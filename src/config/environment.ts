@@ -1,0 +1,2 @@
+import Joi from 'joi';
+export const environmentSchema=Joi.object({NODE_ENV:Joi.string().valid('development','test','production').default('development'),PORT:Joi.number().port().default(3000),DATABASE_URL:Joi.string().uri().required(),REDIS_URL:Joi.string().uri().required(),JWT_ACCESS_SECRET:Joi.string().min(32).required(),JWT_REFRESH_SECRET:Joi.string().min(32).required(),TOKEN_ENCRYPTION_KEY:Joi.string().required(),CORS_ORIGINS:Joi.string().required(),OPENAI_API_KEY:Joi.string().allow('').optional(),SWAGGER_ENABLED:Joi.boolean().default(true)});
