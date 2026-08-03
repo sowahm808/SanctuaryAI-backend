@@ -1,3 +1,43 @@
-import {ConflictException,Injectable,UnauthorizedException} from '@nestjs/common'; import {ConfigService} from '@nestjs/config'; import {JwtService} from '@nestjs/jwt'; import {hash,verify,argon2id} from 'argon2'; import {createHash,randomBytes,randomUUID} from 'node:crypto'; import {PrismaService} from '../../database/prisma.service'; import {LoginDto,RegisterDto} from './dto';
-export interface TokenPair {accessToken:string;refreshToken:string;expiresIn:number}
-@Injectable() export class AuthService {constructor(private readonly db:PrismaService,private readonly jwt:JwtService,private readonly config:ConfigService){} private digest(token:string){return createHash('sha256').update(token).digest('hex');} private async issue(userId:string,familyId:string=randomUUID()):Promise<TokenPair>{const secret=this.config.getOrThrow<string>('JWT_ACCESS_SECRET'); const accessToken=await this.jwt.signAsync({sub:userId},{secret,expiresIn:'15m'}); const opaque=randomBytes(48).toString('base64url'); const session=await this.db.authSession.create({data:{userId,familyId,refreshTokenHash:this.digest(opaque),expiresAt:new Date(Date.now()+30*86400000)}}); return {accessToken,refreshToken:`${session.id}.${opaque}`,expiresIn:900};} async register(dto:RegisterDto){const normalizedEmail=dto.email.trim().toLowerCase(); if(await this.db.user.findUnique({where:{normalizedEmail}})) throw new ConflictException('Email already registered'); const user=await this.db.user.create({data:{email:dto.email,normalizedEmail,displayName:dto.displayName,passwordHash:await hash(dto.password,{type:argon2id})},select:{id:true,email:true,displayName:true,status:true}}); return {user,tokens:await this.issue(user.id)};} async login(dto:LoginDto){const user=await this.db.user.findUnique({where:{normalizedEmail:dto.email.trim().toLowerCase()}}); if(!user||user.deletedAt||user.lockedUntil&&user.lockedUntil>new Date()||!await verify(user.passwordHash,dto.password)){if(user) await this.db.user.update({where:{id:user.id},data:{failedLoginCount:{increment:1},lockedUntil:user.failedLoginCount>=4?new Date(Date.now()+15*60000):undefined}}); throw new UnauthorizedException('Invalid credentials');} await this.db.user.update({where:{id:user.id},data:{failedLoginCount:0,lockedUntil:null,lastLoginAt:new Date()}}); return this.issue(user.id);} async refresh(raw:string){const [id,opaque]=raw.split('.'); if(!id||!opaque) throw new UnauthorizedException('Invalid refresh token'); const current=await this.db.authSession.findUnique({where:{id}}); if(!current||current.expiresAt<new Date()) throw new UnauthorizedException('Invalid refresh token'); if(current.revokedAt){await this.db.authSession.updateMany({where:{familyId:current.familyId,revokedAt:null},data:{revokedAt:new Date()}}); throw new UnauthorizedException('Refresh token reuse detected');} if(this.digest(opaque)!==current.refreshTokenHash) throw new UnauthorizedException('Invalid refresh token'); return this.db.$transaction(async tx=>{await tx.authSession.update({where:{id},data:{revokedAt:new Date()}}); return this.issue(current.userId,current.familyId);});} async logout(raw:string){const id=raw.split('.')[0]; if(id) await this.db.authSession.updateMany({where:{id},data:{revokedAt:new Date()}}); return {revoked:true};}}
+import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { FirebaseService } from '../../database/firebase.service';
+import { LoginDto, RegisterDto } from './dto';
+
+@Injectable()
+export class AuthService {
+  constructor(private readonly firebase: FirebaseService) {}
+
+  async register(dto: RegisterDto) {
+    const response = await this.firebase.signUp(dto.email.trim().toLowerCase(), dto.password, dto.displayName.trim());
+    const identity = await this.firebase.verifyIdToken(response.idToken);
+    await this.firebase.createUserProfile(identity, dto.displayName.trim());
+    await this.firebase.sendVerification(response.idToken);
+    return this.authResponse(response, identity);
+  }
+
+  async login(dto: LoginDto) {
+    try {
+      const response = await this.firebase.signIn(dto.email.trim().toLowerCase(), dto.password);
+      const identity = await this.firebase.verifyIdToken(response.idToken);
+      return this.authResponse(response, identity);
+    } catch {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+  }
+
+  async refresh(refreshToken: string) {
+    const response = await this.firebase.refresh(refreshToken);
+    const identity = await this.firebase.verifyIdToken(response.idToken);
+    return this.authResponse(response, identity);
+  }
+
+  async forgotPassword(email: string) {
+    try { await this.firebase.sendPasswordReset(email.trim().toLowerCase()); } catch { /* Enumeration-safe by design. */ }
+    return { accepted: true };
+  }
+
+  resendVerification(idToken: string) { return this.firebase.sendVerification(idToken).then(() => ({ accepted: true })); }
+
+  private authResponse(response: { idToken: string; refreshToken: string; expiresIn: string }, identity: { uid: string; email?: string; emailVerified: boolean; name?: string }) {
+    return { user: identity, tokens: { accessToken: response.idToken, refreshToken: response.refreshToken, expiresIn: Number(response.expiresIn) } };
+  }
+}

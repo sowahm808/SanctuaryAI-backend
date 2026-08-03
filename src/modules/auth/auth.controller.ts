@@ -1,2 +1,18 @@
-import {Body,Controller,Post,HttpCode} from '@nestjs/common'; import {ApiOperation,ApiTags} from '@nestjs/swagger'; import {AuthService} from './auth.service'; import {LoginDto,RefreshDto,RegisterDto} from './dto';
-@ApiTags('Authentication') @Controller('auth') export class AuthController {constructor(private readonly auth:AuthService){} @Post('register') @ApiOperation({summary:'Register with email and password'}) register(@Body() dto:RegisterDto){return this.auth.register(dto);} @Post('login') @HttpCode(200) @ApiOperation({summary:'Authenticate and create a device session'}) login(@Body() dto:LoginDto){return this.auth.login(dto);} @Post('refresh') @HttpCode(200) @ApiOperation({summary:'Rotate a refresh token'}) refresh(@Body() dto:RefreshDto){return this.auth.refresh(dto.refreshToken);} @Post('logout') @HttpCode(200) @ApiOperation({summary:'Revoke a device session'}) logout(@Body() dto:RefreshDto){return this.auth.logout(dto.refreshToken);}}
+import { Body, Controller, Get, Headers, HttpCode, Post, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { CurrentUser, FirebaseAuthGuard } from '../../security/firebase-auth.guard';
+import { FirebaseIdentity } from '../../database/firebase.service';
+import { AuthService } from './auth.service';
+import { EmailDto, LoginDto, RefreshDto, RegisterDto } from './dto';
+
+@ApiTags('Authentication')
+@Controller('auth')
+export class AuthController {
+  constructor(private readonly auth: AuthService) {}
+  @Post('register') @ApiOperation({ summary: 'Create a Firebase email/password account' }) register(@Body() dto: RegisterDto) { return this.auth.register(dto); }
+  @Post('login') @HttpCode(200) @ApiOperation({ summary: 'Sign in through Firebase Authentication' }) login(@Body() dto: LoginDto) { return this.auth.login(dto); }
+  @Post('refresh') @HttpCode(200) @ApiOperation({ summary: 'Exchange a Firebase refresh token' }) refresh(@Body() dto: RefreshDto) { return this.auth.refresh(dto.refreshToken); }
+  @Post('forgot-password') @HttpCode(202) @ApiOperation({ summary: 'Request a Firebase password-reset email' }) forgot(@Body() dto: EmailDto) { return this.auth.forgotPassword(dto.email); }
+  @Post('resend-verification') @HttpCode(202) @ApiOperation({ summary: 'Request another Firebase verification email' }) resend(@Headers('authorization') authorization?: string) { return this.auth.resendVerification(authorization?.replace(/^Bearer\s+/i, '') ?? ''); }
+  @Get('me') @UseGuards(FirebaseAuthGuard) @ApiBearerAuth() @ApiOperation({ summary: 'Return the verified Firebase identity' }) me(@CurrentUser() user: FirebaseIdentity) { return user; }
+}
