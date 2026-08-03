@@ -4,6 +4,14 @@ This checklist turns the product requirements into an implementation and release
 
 > Implementation status last audited against the backend on 2026-08-03. Only fully implemented checklist items are checked; partially implemented items remain open.
 
+### Audit snapshot
+
+- **28 of 277 items complete (10.1%).** The implemented foundation is concentrated in the Prisma data model and seed; the application layer currently exposes health checks and four authentication routes (`register`, `login`, `refresh`, and `logout`).
+- **Automated coverage is not yet representative.** The repository contains one unit test, for token-encryption round trips, and no integration or end-to-end suites. Authentication, tenancy, authorization, controllers, queues, providers, and workers therefore remain unchecked even where partial code exists.
+- **Release installation is currently blocked.** `package-lock.json` is absent, so the documented and gated `npm ci` workflow cannot run from a clean checkout.
+- **Notable partial implementations:** startup validation covers the variables currently consumed by the scaffold, but typed provider configuration is incomplete; correlation IDs are limited to HTTP context; the problem filter is generic rather than a complete RFC 7807 error mapping; authentication lacks the full identity lifecycle; campaign code is an unwired three-method service; health readiness checks only PostgreSQL; and the Docker/Compose setup has no worker, migration service, Redis readiness check from the API, or object storage.
+- **Audit rule:** an item stays open when any clause in that item is missing. Passing build or test commands confirms only the corresponding release-gate item and does not imply feature completeness.
+
 ## Definition of done
 
 - [ ] Production code contains no mocks, empty controllers, placeholder services, `any`, suppressed TypeScript errors, exposed secrets, or unvalidated provider output.
@@ -18,7 +26,7 @@ This checklist turns the product requirements into an implementation and release
 - [ ] Enable strict TypeScript settings and lint rules that prohibit `any`, unsafe assertions, ignored errors, and floating promises.
 - [ ] Establish modular-monolith boundaries for domain, application, infrastructure, controllers, persistence, integrations, jobs, and shared concerns.
 - [ ] Create the required `src/config`, `src/common`, `src/database`, `src/modules`, `src/integrations`, `src/jobs`, `src/security`, `src/observability`, `src/storage`, `src/ai`, and `src/webhooks` structure.
-- [ ] Validate environment variables at startup and fail fast for invalid or missing production settings.
+- [ ] Validate environment variables at startup and fail fast for invalid or missing production settings. (The current schema validates scaffold settings, but production provider settings are absent and OpenAI remains optional in production.)
 - [ ] Define typed configuration groups for application, PostgreSQL, Redis, JWT, OAuth, encryption, email, storage, OpenAI, Meta, TikTok, rendering, observability, CORS, and rate limits.
 - [ ] Complete `.env.example` with safe placeholders and descriptions but no credentials.
 - [x] Configure `/api/v1` as the REST prefix and conditionally expose Swagger at `/docs`.
@@ -46,7 +54,7 @@ This checklist turns the product requirements into an implementation and release
 - [x] Add webhook event, idempotency record, invitation, verification token, password-reset token, analytics snapshot/metric, calendar item, and system-setting models.
 - [x] Replace remaining free-form lifecycle status fields with enums.
 - [x] Add `organizationId` to every tenant-owned model, including child records where direct tenant filtering is required; document justified exceptions.
-- [x] Add soft-deletion fields and default exclusion behavior to applicable records.
+- [ ] Add soft-deletion fields and default exclusion behavior to applicable records. (Fields exist, but there is no global Prisma/repository default exclusion.)
 - [x] Add unique organization/month/year campaign constraint and all domain uniqueness constraints.
 - [x] Add indexes for tenant/status/date lookups, queue reconciliation, token expiry, scheduling, audit queries, and cursor pagination.
 - [x] Add check constraints or service validation for valid months, years, percentages, sequences, durations, attempt limits, and version numbers.
@@ -92,7 +100,7 @@ This checklist turns the product requirements into an implementation and release
 
 ## Phase 5 — Roles, permissions, and policies
 
-- [ ] Seed roles: SuperAdministrator, ChurchAdministrator, SeniorPastor, AssociatePastor, ContentWriter, MediaTeam, Reviewer, Publisher, and Viewer.
+- [x] Seed roles: SuperAdministrator, ChurchAdministrator, SeniorPastor, AssociatePastor, ContentWriter, MediaTeam, Reviewer, Publisher, and Viewer.
 - [ ] Seed the full permission catalogue, including all permissions listed in the requirements.
 - [ ] Define and document default role-to-permission mappings.
 - [x] Implement `@Roles()` and `@Permissions()` decorators.
