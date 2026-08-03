@@ -2,6 +2,8 @@
 
 This checklist turns the product requirements into an implementation and release plan for the production SanctuaryAI backend. Complete phases in order unless a task is explicitly marked as parallelizable. A checked item must be supported by merged code, automated tests, and documentation where applicable; the presence of a scaffold alone does not count as completion.
 
+> Implementation status last audited against the backend on 2026-08-03. Only fully implemented checklist items are checked; partially implemented items remain open.
+
 ## Definition of done
 
 - [ ] Production code contains no mocks, empty controllers, placeholder services, `any`, suppressed TypeScript errors, exposed secrets, or unvalidated provider output.
@@ -19,12 +21,12 @@ This checklist turns the product requirements into an implementation and release
 - [ ] Validate environment variables at startup and fail fast for invalid or missing production settings.
 - [ ] Define typed configuration groups for application, PostgreSQL, Redis, JWT, OAuth, encryption, email, storage, OpenAI, Meta, TikTok, rendering, observability, CORS, and rate limits.
 - [ ] Complete `.env.example` with safe placeholders and descriptions but no credentials.
-- [ ] Configure `/api/v1` as the REST prefix and conditionally expose Swagger at `/docs`.
+- [x] Configure `/api/v1` as the REST prefix and conditionally expose Swagger at `/docs`.
 - [ ] Add global validation with transformation, whitelist enforcement, rejection of unknown properties, and appropriate request-size limits.
 - [ ] Add Helmet, compression, cookie parsing, strict CORS allowlisting, secure proxy handling, and graceful shutdown.
-- [ ] Add structured Pino logging with secret-field redaction.
+- [x] Add structured Pino logging with secret-field redaction.
 - [ ] Add correlation-ID creation/validation and propagation through responses, logs, jobs, outbound requests, and errors.
-- [ ] Add a global success envelope: `data`, `meta`, and `correlationId`.
+- [x] Add a global success envelope: `data`, `meta`, and `correlationId`.
 - [ ] Add RFC 7807-compatible filters for validation, domain, Prisma, integration, and unexpected errors without production stack traces.
 - [ ] Configure Swagger bearer authentication, schemas, examples, pagination, permission notes, and standard error responses.
 
@@ -93,7 +95,7 @@ This checklist turns the product requirements into an implementation and release
 - [ ] Seed roles: SuperAdministrator, ChurchAdministrator, SeniorPastor, AssociatePastor, ContentWriter, MediaTeam, Reviewer, Publisher, and Viewer.
 - [ ] Seed the full permission catalogue, including all permissions listed in the requirements.
 - [ ] Define and document default role-to-permission mappings.
-- [ ] Implement `@Roles()` and `@Permissions()` decorators.
+- [x] Implement `@Roles()` and `@Permissions()` decorators.
 - [ ] Implement authentication, role/permission authorization, organization membership, and resource ownership guards.
 - [ ] Make authorization services tenant-aware and deny by default.
 - [ ] Use transactions for role changes and permission assignments.
@@ -343,7 +345,7 @@ This checklist turns the product requirements into an implementation and release
 - [ ] `npm run seed` succeeds and is safe to rerun where documented.
 - [ ] `npm run lint` succeeds with no suppressed errors.
 - [ ] `npm run build` succeeds in strict mode.
-- [ ] `npm test` succeeds.
+- [x] `npm test` succeeds.
 - [ ] `npm run test:integration` succeeds.
 - [ ] Supertest end-to-end tests succeed.
 - [ ] Tenant-isolation and permission-denial suites succeed.
