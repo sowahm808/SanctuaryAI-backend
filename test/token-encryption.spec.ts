@@ -1,2 +1,12 @@
-import {ConfigService} from '@nestjs/config'; import {TokenEncryptionService} from '../src/security/token-encryption.service';
-describe('TokenEncryptionService',()=>{it('round trips without exposing plaintext',()=>{const service=new TokenEncryptionService(new ConfigService({TOKEN_ENCRYPTION_KEY:'test-key-material'})); const encrypted=service.encrypt('secret-token'); expect(encrypted).not.toContain('secret-token'); expect(service.decrypt(encrypted)).toBe('secret-token');});});
+import { ConfigService } from "@nestjs/config";
+import { TokenEncryptionService } from "../src/security/token-encryption.service";
+describe("TokenEncryptionService", () => {
+  it("round trips without exposing plaintext", () => {
+    const service = new TokenEncryptionService(
+      new ConfigService({ TOKEN_ENCRYPTION_KEY: "test-key-material" }),
+    );
+    const encrypted = service.encrypt("secret-token");
+    expect(encrypted).not.toContain("secret-token");
+    expect(service.decrypt(encrypted)).toBe("secret-token");
+  });
+});
