@@ -4,7 +4,7 @@ import { NestFactory } from "@nestjs/core";
 import { ConfigService } from "@nestjs/config";
 import { SwaggerModule, DocumentBuilder } from "@nestjs/swagger";
 
-import helmet = require("helmet");
+import helmet from "helmet";
 import compression = require("compression");
 import cookieParser = require("cookie-parser");
 
@@ -13,7 +13,10 @@ import { EnvelopeInterceptor } from "./common/envelope.interceptor";
 import { ProblemFilter } from "./common/problem.filter";
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create(AppModule, {
+    bufferLogs: true,
+  });
+
   const config = app.get(ConfigService);
 
   app.setGlobalPrefix("api/v1");
@@ -52,14 +55,18 @@ async function bootstrap(): Promise<void> {
       .addBearerAuth()
       .build();
 
-    const document = SwaggerModule.createDocument(app, swaggerConfig);
+    const swaggerDocument = SwaggerModule.createDocument(
+      app,
+      swaggerConfig,
+    );
 
-    SwaggerModule.setup("docs", app, document);
+    SwaggerModule.setup("docs", app, swaggerDocument);
   }
 
   app.enableShutdownHooks();
 
   const port = config.get<number>("PORT") ?? 3000;
+
   await app.listen(port, "0.0.0.0");
 }
 
