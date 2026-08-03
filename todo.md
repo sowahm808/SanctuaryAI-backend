@@ -6,9 +6,9 @@ This checklist turns the product requirements into an implementation and release
 
 ### Audit snapshot
 
-- **8 of 277 items complete (2.9%).** The backend now uses Firebase Authentication and Cloud Firestore exclusively. The Firebase identity foundation exposes register, login, refresh, verification resend, password-reset request, and verified-current-user routes; most product domains remain unimplemented.
+- **10 of 277 items complete (3.6%).** The backend now uses Firebase Authentication and Cloud Firestore exclusively. The Firebase identity foundation exposes register, login, refresh, verification resend, password-reset request, and verified-current-user routes; most product domains remain unimplemented.
 - **Automated coverage is not yet representative.** The repository contains one unit test for token-encryption round trips and no Firebase emulator integration or end-to-end suites. Authentication, tenancy, authorization, controllers, queues, providers, and workers therefore remain unchecked unless every clause is supported.
-- **Reproducible installation is restored.** `package-lock.json`, `.nvmrc`, and the npm package-manager declaration are committed. The current audit container runs Node 20, so the Node 22 clean-install gate still requires verification in the target runtime.
+- **Reproducible installation is restored.** `package-lock.json`, `.nvmrc`, and the npm package-manager declaration are committed. In this audit, `npm ci`, lint, the strict TypeScript build, and the unit test suite pass under the container's Node 20 runtime. The Node 22 clean-install gate remains open until it is verified in the target runtime.
 - **Notable partial implementations:** Firebase ID tokens are cryptographically verified and Firestore uses short-lived service-account OAuth tokens, but tenant repositories and most domain modules are not implemented. Correlation IDs remain HTTP-only, the problem filter is generic, health readiness checks only Firestore, and workers, Redis readiness, storage, AI, social providers, and full automated coverage remain outstanding.
 - **Audit rule:** an item stays open when any clause in that item is missing. Passing build or test commands confirms only the corresponding release-gate item and does not imply feature completeness.
 
@@ -351,8 +351,8 @@ This checklist turns the product requirements into an implementation and release
 - [ ] Firestore Security Rules and indexes validate successfully.
 - [ ] Firestore indexes and Security Rules deploy successfully to a clean Firebase project.
 - [ ] The Firebase seed command succeeds and is safe to rerun where documented.
-- [ ] `npm run lint` succeeds with no suppressed errors.
-- [ ] `npm run build` succeeds in strict mode.
+- [x] `npm run lint` succeeds with no suppressed errors.
+- [x] `npm run build` succeeds in strict mode.
 - [x] `npm test` succeeds.
 - [ ] `npm run test:integration` succeeds.
 - [ ] Supertest end-to-end tests succeed.
