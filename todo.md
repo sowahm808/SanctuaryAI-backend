@@ -32,29 +32,29 @@ This checklist turns the product requirements into an implementation and release
 
 ## Phase 2 — Prisma schema, migrations, and seed data
 
-- [ ] Review all IDs and foreign keys for UUID consistency, explicit referential actions, and correct optionality.
-- [ ] Implement/verify enums: `UserStatus`, `OrganizationStatus`, `MembershipStatus`, `ContentStatus`, `ApprovalStatus`, `SocialPlatform`, `SocialPostStatus`, `PublishingJobStatus`, `AiGenerationStatus`, `MediaAssetStatus`, `RenderStatus`, `NotificationType`, and `CampaignStatus`.
-- [ ] Implement complete required models and relations for users, organizations, memberships, roles, permissions, and authentication sessions/tokens.
-- [ ] Implement complete required models and relations for church profiles and brand kits, including media-asset relations.
-- [ ] Implement complete required models and relations for monthly campaigns, monthly themes, sermon series, sermons, and sermon versions.
-- [ ] Implement complete required models and relations for prayer collections, prayer points, and prophetic declarations.
-- [ ] Implement complete required models and relations for media assets, flyer projects, video projects, and templates.
-- [ ] Implement complete required models and relations for social accounts, social posts, and publishing jobs.
-- [ ] Implement complete required models and relations for approvals, review comments, notifications, AI generations, and audit logs.
-- [ ] Add knowledge-base document, chunk, embedding metadata, ingestion job, and retrieval log models with mandatory tenant ownership.
-- [ ] Add immutable version models for themes, prayers, declarations, flyers, and social posts, including editor, timestamp, change summary, snapshot/diff, and approval state.
-- [ ] Add webhook event, idempotency record, invitation, verification token, password-reset token, analytics snapshot/metric, calendar item, and system-setting models.
-- [ ] Replace remaining free-form lifecycle status fields with enums.
-- [ ] Add `organizationId` to every tenant-owned model, including child records where direct tenant filtering is required; document justified exceptions.
-- [ ] Add soft-deletion fields and default exclusion behavior to applicable records.
-- [ ] Add unique organization/month/year campaign constraint and all domain uniqueness constraints.
-- [ ] Add indexes for tenant/status/date lookups, queue reconciliation, token expiry, scheduling, audit queries, and cursor pagination.
-- [ ] Add check constraints or service validation for valid months, years, percentages, sequences, durations, attempt limits, and version numbers.
-- [ ] Generate and review an initial migration rather than relying on schema push.
-- [ ] Add deterministic seeds for permissions and all default system roles.
-- [ ] Seed a configurable development super administrator without production credentials.
-- [ ] Seed the sample organization, church profile, brand kit, campaign, theme, sermon, prayer collection, and declaration.
-- [ ] Document the entity relationships and tenant ownership rules.
+- [x] Review all IDs and foreign keys for UUID consistency, explicit referential actions, and correct optionality.
+- [x] Implement/verify enums: `UserStatus`, `OrganizationStatus`, `MembershipStatus`, `ContentStatus`, `ApprovalStatus`, `SocialPlatform`, `SocialPostStatus`, `PublishingJobStatus`, `AiGenerationStatus`, `MediaAssetStatus`, `RenderStatus`, `NotificationType`, and `CampaignStatus`.
+- [x] Implement complete required models and relations for users, organizations, memberships, roles, permissions, and authentication sessions/tokens.
+- [x] Implement complete required models and relations for church profiles and brand kits, including media-asset relations.
+- [x] Implement complete required models and relations for monthly campaigns, monthly themes, sermon series, sermons, and sermon versions.
+- [x] Implement complete required models and relations for prayer collections, prayer points, and prophetic declarations.
+- [x] Implement complete required models and relations for media assets, flyer projects, video projects, and templates.
+- [x] Implement complete required models and relations for social accounts, social posts, and publishing jobs.
+- [x] Implement complete required models and relations for approvals, review comments, notifications, AI generations, and audit logs.
+- [x] Add knowledge-base document, chunk, embedding metadata, ingestion job, and retrieval log models with mandatory tenant ownership.
+- [x] Add immutable version models for themes, prayers, declarations, flyers, and social posts, including editor, timestamp, change summary, snapshot/diff, and approval state.
+- [x] Add webhook event, idempotency record, invitation, verification token, password-reset token, analytics snapshot/metric, calendar item, and system-setting models.
+- [x] Replace remaining free-form lifecycle status fields with enums.
+- [x] Add `organizationId` to every tenant-owned model, including child records where direct tenant filtering is required; document justified exceptions.
+- [x] Add soft-deletion fields and default exclusion behavior to applicable records.
+- [x] Add unique organization/month/year campaign constraint and all domain uniqueness constraints.
+- [x] Add indexes for tenant/status/date lookups, queue reconciliation, token expiry, scheduling, audit queries, and cursor pagination.
+- [x] Add check constraints or service validation for valid months, years, percentages, sequences, durations, attempt limits, and version numbers.
+- [x] Generate and review an initial migration rather than relying on schema push.
+- [x] Add deterministic seeds for permissions and all default system roles.
+- [x] Seed a configurable development super administrator without production credentials.
+- [x] Seed the sample organization, church profile, brand kit, campaign, theme, sermon, prayer collection, and declaration.
+- [x] Document the entity relationships and tenant ownership rules.
 
 ## Phase 3 — Authentication and identity lifecycle
 
