@@ -1,43 +1,17 @@
-# Data model and tenant ownership
+# Firestore data model
 
-## Rules
+Cloud Firestore is the sole application database. Firebase Authentication is the identity authority; `users/{uid}` mirrors only safe profile and application-state fields. It must never contain passwords, ID tokens, refresh tokens, private keys, or OAuth provider tokens.
 
-Every tenant-owned row stores `organizationId`, including child/version records. Repositories must obtain that value from the authenticated request context, add it to every unique lookup and mutation, and include `deletedAt: null` for models that support soft deletion. A client-provided organization identifier is never authorization. Create/update code must also verify that referenced records have the same `organizationId`; a UUID foreign key proves identity, not tenant ownership.
+## Collection conventions
 
-The only deliberate nullable tenant keys are platform-wide `Role`, `Template`, `SystemSetting`, `WebhookEvent`, and `IdempotencyRecord` rows. `null` means platform scope and access must be limited to platform administrators. Users, authentication sessions, verification/password-reset tokens, and permissions are identity/platform records. They acquire tenant access only through an active membership. Audit logs and version rows are append-only and are never soft deleted.
+Top-level collections use plural lower-case names (`users`, `organizations`, `memberships`, `campaigns`, `themes`, `sermons`, and so on). Tenant-owned documents store `organizationId` directly even when nested below another resource. This deliberate denormalization makes tenant predicates reviewable and supports compound indexes. References are stable Firestore document IDs, timestamps are Firestore timestamps, and lifecycle values use documented string enums.
 
-Applicable mutable business records expose `deletedAt`. Normal reads must exclude deleted rows; restore/administrative queries must opt in explicitly. Children that are meaningless without their parent use `onDelete: Cascade`; optional historical associations use `SetNull`; membership role changes use `Restrict`. Production code should normally soft-delete aggregates rather than invoke referential actions.
+Soft-deletable documents use `deletedAt`. Repository methods exclude deleted documents by default. Immutable content versions live in dedicated version subcollections and record editor UID, creation timestamp, change summary, snapshot/diff, and approval state.
 
-## Relationship map
+## Authorization boundary
 
-```text
-User --< Membership >-- Organization --< Role --< RolePermission >-- Permission
-User --< AuthSession
-Organization -- ChurchProfile
-Organization -- BrandKit >-- MediaAsset (primary/secondary logos)
-Organization --< MonthlyCampaign --< MonthlyTheme --< ThemeVersion
-                         |--< SermonSeries --< Sermon --< SermonVersion
-                         |--< PrayerCollection --< PrayerPoint
-                         |                        `--< PrayerVersion
-                         `--< PropheticDeclaration --< DeclarationVersion
-Organization --< FlyerProject --< FlyerVersion
-Organization --< VideoProject
-Organization --< SocialPost --< SocialPostVersion
-                            `--< PublishingJob >-- SocialAccount
-Organization --< ApprovalRequest --< ReviewComment
-Organization --< KnowledgeDocument --< KnowledgeChunk -- EmbeddingMetadata
-                                  `--< IngestionJob
-Organization --< AnalyticsSnapshot --< AnalyticsMetric
-```
+The API service account bypasses Firestore Security Rules. Every organization-owned operation must derive the active organization from a verified Firebase identity and active membership, apply `organizationId` to every query, and verify related resources belong to that same tenant. Rules are defense in depth for any direct client access, not a substitute for backend checks.
 
-Polymorphic references (`resourceType` plus `resourceId`) deliberately have no database foreign key. The application must resolve them through a closed resource registry and enforce tenant equality. Media references embedded in validated JSON receive the same ownership validation.
+## Indexes and evolution
 
-## Integrity and query behavior
-
-All IDs and scalar foreign-key identifiers are PostgreSQL UUIDs. Domain uniqueness includes normalized user email, organization slug, membership per user/organization, campaign per organization/month/year, sequence/version pairs, provider event IDs, social accounts, storage keys, and idempotency scopes. Indexes begin with tenant and commonly-used status/date fields; stable UUIDs terminate cursor-oriented indexes.
-
-The initial migration adds database checks for months, supported years, percentages, positive durations/dimensions, sequences, version numbers, chronological calendar ranges, token counts, and bounded queue attempts. DTO validation should reject these values earlier and provide useful errors; database checks remain the final concurrency-safe defense.
-
-## Migration and seed workflow
-
-Run `npm run prisma:generate`, then apply committed migrations with `npm run migrate:deploy`; do not use `prisma db push`. `npm run seed` is deterministic and rerunnable. It installs the permission catalogue, nine default roles, and a sample church data graph. To create a real development login, set `DEV_SUPER_ADMIN_EMAIL` and a `DEV_SUPER_ADMIN_PASSWORD` of at least 12 characters. The seed refuses this feature when `NODE_ENV=production`; no working credential is stored in source.
+Compound query indexes and Security Rules must be committed in `firestore.indexes.json` and `firestore.rules` before domain collections are considered implemented. Data evolution uses versioned, idempotent migration scripts and emulator tests rather than relational migrations. Those artifacts are still outstanding and remain unchecked in `todo.md`.

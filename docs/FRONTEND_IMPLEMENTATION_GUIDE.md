@@ -10,7 +10,7 @@ Build navigation from server-returned permissions. Hiding a control improves usa
 
 ## Shared TypeScript contracts
 
-Generate API types from Swagger rather than copying Prisma types into the browser. Prisma records contain internal fields and secrets that response DTOs must omit. Model lifecycle values as string unions generated from the API enums, and use exhaustive rendering so a newly-added state fails CI instead of silently appearing blank.
+Generate API types from Swagger rather than copying internal persistence types into the browser. Persistence records contain internal fields and secrets that response DTOs must omit. Model lifecycle values as string unions generated from the API enums, and use exhaustive rendering so a newly-added state fails CI instead of silently appearing blank.
 
 Use one standard entity shape for editable resources:
 

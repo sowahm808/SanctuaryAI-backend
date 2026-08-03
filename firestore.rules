@@ -1,0 +1,27 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function activeMember(organizationId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/memberships/$(organizationId + '_' + request.auth.uid))
+        && get(/databases/$(database)/documents/memberships/$(organizationId + '_' + request.auth.uid)).data.status == 'ACTIVE';
+    }
+    match /users/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if false;
+    }
+    match /organizations/{organizationId} {
+      allow read: if activeMember(organizationId);
+      allow write: if false;
+    }
+    match /memberships/{membershipId} {
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+    match /{collection}/{documentId} {
+      allow read: if resource.data.organizationId is string && activeMember(resource.data.organizationId);
+      allow create, update, delete: if false;
+    }
+  }
+}

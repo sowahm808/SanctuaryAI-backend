@@ -6,10 +6,10 @@ This checklist turns the product requirements into an implementation and release
 
 ### Audit snapshot
 
-- **28 of 277 items complete (10.1%).** The implemented foundation is concentrated in the Prisma data model and seed; the application layer currently exposes health checks and four authentication routes (`register`, `login`, `refresh`, and `logout`).
-- **Automated coverage is not yet representative.** The repository contains one unit test, for token-encryption round trips, and no integration or end-to-end suites. Authentication, tenancy, authorization, controllers, queues, providers, and workers therefore remain unchecked even where partial code exists.
-- **Release installation is currently blocked.** `package-lock.json` is absent, so the documented and gated `npm ci` workflow cannot run from a clean checkout.
-- **Notable partial implementations:** startup validation covers the variables currently consumed by the scaffold, but typed provider configuration is incomplete; correlation IDs are limited to HTTP context; the problem filter is generic rather than a complete RFC 7807 error mapping; authentication lacks the full identity lifecycle; campaign code is an unwired three-method service; health readiness checks only PostgreSQL; and the Docker/Compose setup has no worker, migration service, Redis readiness check from the API, or object storage.
+- **8 of 277 items complete (2.9%).** The backend now uses Firebase Authentication and Cloud Firestore exclusively. The Firebase identity foundation exposes register, login, refresh, verification resend, password-reset request, and verified-current-user routes; most product domains remain unimplemented.
+- **Automated coverage is not yet representative.** The repository contains one unit test for token-encryption round trips and no Firebase emulator integration or end-to-end suites. Authentication, tenancy, authorization, controllers, queues, providers, and workers therefore remain unchecked unless every clause is supported.
+- **Reproducible installation is restored.** `package-lock.json`, `.nvmrc`, and the npm package-manager declaration are committed. The current audit container runs Node 20, so the Node 22 clean-install gate still requires verification in the target runtime.
+- **Notable partial implementations:** Firebase ID tokens are cryptographically verified and Firestore uses short-lived service-account OAuth tokens, but tenant repositories and most domain modules are not implemented. Correlation IDs remain HTTP-only, the problem filter is generic, health readiness checks only Firestore, and workers, Redis readiness, storage, AI, social providers, and full automated coverage remain outstanding.
 - **Audit rule:** an item stays open when any clause in that item is missing. Passing build or test commands confirms only the corresponding release-gate item and does not imply feature completeness.
 
 ## Definition of done
@@ -18,7 +18,7 @@ This checklist turns the product requirements into an implementation and release
 - [ ] Every organization-owned operation derives its tenant from authenticated request context and enforces membership, permissions, and resource ownership server-side.
 - [ ] Every endpoint has validation, safe serialization, RFC 7807 errors, response envelopes, correlation IDs, authorization, audit behavior, and complete Swagger documentation.
 - [ ] Long-running and retriable work runs in BullMQ workers with persistence, idempotency, backoff, timeouts, progress, cancellation where possible, and dead-letter handling.
-- [ ] All required checks in the final release gate pass against clean PostgreSQL and Redis instances.
+- [ ] All required checks in the final release gate pass against clean Firebase Emulator Suite and Redis instances.
 
 ## Phase 1 — Project bootstrap and configuration
 
@@ -27,7 +27,7 @@ This checklist turns the product requirements into an implementation and release
 - [ ] Establish modular-monolith boundaries for domain, application, infrastructure, controllers, persistence, integrations, jobs, and shared concerns.
 - [ ] Create the required `src/config`, `src/common`, `src/database`, `src/modules`, `src/integrations`, `src/jobs`, `src/security`, `src/observability`, `src/storage`, `src/ai`, and `src/webhooks` structure.
 - [ ] Validate environment variables at startup and fail fast for invalid or missing production settings. (The current schema validates scaffold settings, but production provider settings are absent and OpenAI remains optional in production.)
-- [ ] Define typed configuration groups for application, PostgreSQL, Redis, JWT, OAuth, encryption, email, storage, OpenAI, Meta, TikTok, rendering, observability, CORS, and rate limits.
+- [ ] Define typed configuration groups for application, Firebase, Firestore, Redis, OAuth, encryption, email, storage, OpenAI, Meta, TikTok, rendering, observability, CORS, and rate limits.
 - [ ] Complete `.env.example` with safe placeholders and descriptions but no credentials.
 - [x] Configure `/api/v1` as the REST prefix and conditionally expose Swagger at `/docs`.
 - [ ] Add global validation with transformation, whitelist enforcement, rejection of unknown properties, and appropriate request-size limits.
@@ -35,46 +35,46 @@ This checklist turns the product requirements into an implementation and release
 - [x] Add structured Pino logging with secret-field redaction.
 - [ ] Add correlation-ID creation/validation and propagation through responses, logs, jobs, outbound requests, and errors.
 - [x] Add a global success envelope: `data`, `meta`, and `correlationId`.
-- [ ] Add RFC 7807-compatible filters for validation, domain, Prisma, integration, and unexpected errors without production stack traces.
+- [ ] Add RFC 7807-compatible filters for validation, domain, Firestore, Firebase integration, and unexpected errors without production stack traces.
 - [ ] Configure Swagger bearer authentication, schemas, examples, pagination, permission notes, and standard error responses.
 
-## Phase 2 — Prisma schema, migrations, and seed data
+## Phase 2 — Firestore model, indexes, rules, and seed data
 
-- [x] Review all IDs and foreign keys for UUID consistency, explicit referential actions, and correct optionality.
-- [x] Implement/verify enums: `UserStatus`, `OrganizationStatus`, `MembershipStatus`, `ContentStatus`, `ApprovalStatus`, `SocialPlatform`, `SocialPostStatus`, `PublishingJobStatus`, `AiGenerationStatus`, `MediaAssetStatus`, `RenderStatus`, `NotificationType`, and `CampaignStatus`.
-- [x] Implement complete required models and relations for users, organizations, memberships, roles, permissions, and authentication sessions/tokens.
-- [x] Implement complete required models and relations for church profiles and brand kits, including media-asset relations.
-- [x] Implement complete required models and relations for monthly campaigns, monthly themes, sermon series, sermons, and sermon versions.
-- [x] Implement complete required models and relations for prayer collections, prayer points, and prophetic declarations.
-- [x] Implement complete required models and relations for media assets, flyer projects, video projects, and templates.
-- [x] Implement complete required models and relations for social accounts, social posts, and publishing jobs.
-- [x] Implement complete required models and relations for approvals, review comments, notifications, AI generations, and audit logs.
-- [x] Add knowledge-base document, chunk, embedding metadata, ingestion job, and retrieval log models with mandatory tenant ownership.
-- [x] Add immutable version models for themes, prayers, declarations, flyers, and social posts, including editor, timestamp, change summary, snapshot/diff, and approval state.
-- [x] Add webhook event, idempotency record, invitation, verification token, password-reset token, analytics snapshot/metric, calendar item, and system-setting models.
-- [x] Replace remaining free-form lifecycle status fields with enums.
-- [x] Add `organizationId` to every tenant-owned model, including child records where direct tenant filtering is required; document justified exceptions.
-- [ ] Add soft-deletion fields and default exclusion behavior to applicable records. (Fields exist, but there is no global Prisma/repository default exclusion.)
-- [x] Add unique organization/month/year campaign constraint and all domain uniqueness constraints.
-- [x] Add indexes for tenant/status/date lookups, queue reconciliation, token expiry, scheduling, audit queries, and cursor pagination.
-- [x] Add check constraints or service validation for valid months, years, percentages, sequences, durations, attempt limits, and version numbers.
-- [x] Generate and review an initial migration rather than relying on schema push.
-- [x] Add deterministic seeds for permissions and all default system roles.
-- [x] Seed a configurable development super administrator without production credentials.
-- [x] Seed the sample organization, church profile, brand kit, campaign, theme, sermon, prayer collection, and declaration.
-- [x] Document the entity relationships and tenant ownership rules.
+- [ ] Review all IDs and foreign keys for UUID consistency, explicit referential actions, and correct optionality.
+- [ ] Implement/verify enums: `UserStatus`, `OrganizationStatus`, `MembershipStatus`, `ContentStatus`, `ApprovalStatus`, `SocialPlatform`, `SocialPostStatus`, `PublishingJobStatus`, `AiGenerationStatus`, `MediaAssetStatus`, `RenderStatus`, `NotificationType`, and `CampaignStatus`.
+- [ ] Implement complete required models and relations for users, organizations, memberships, roles, permissions, and authentication sessions/tokens.
+- [ ] Implement complete required models and relations for church profiles and brand kits, including media-asset relations.
+- [ ] Implement complete required models and relations for monthly campaigns, monthly themes, sermon series, sermons, and sermon versions.
+- [ ] Implement complete required models and relations for prayer collections, prayer points, and prophetic declarations.
+- [ ] Implement complete required models and relations for media assets, flyer projects, video projects, and templates.
+- [ ] Implement complete required models and relations for social accounts, social posts, and publishing jobs.
+- [ ] Implement complete required models and relations for approvals, review comments, notifications, AI generations, and audit logs.
+- [ ] Add knowledge-base document, chunk, embedding metadata, ingestion job, and retrieval log models with mandatory tenant ownership.
+- [ ] Add immutable version models for themes, prayers, declarations, flyers, and social posts, including editor, timestamp, change summary, snapshot/diff, and approval state.
+- [ ] Add webhook event, idempotency record, invitation, verification token, password-reset token, analytics snapshot/metric, calendar item, and system-setting models.
+- [ ] Replace remaining free-form lifecycle status fields with enums.
+- [ ] Add `organizationId` to every tenant-owned model, including child records where direct tenant filtering is required; document justified exceptions.
+- [ ] Add soft-deletion fields and default exclusion behavior to applicable records. (Fields exist, but there is no global Firestore repository default exclusion.)
+- [ ] Add unique organization/month/year campaign constraint and all domain uniqueness constraints.
+- [ ] Add indexes for tenant/status/date lookups, queue reconciliation, token expiry, scheduling, audit queries, and cursor pagination.
+- [ ] Add check constraints or service validation for valid months, years, percentages, sequences, durations, attempt limits, and version numbers.
+- [ ] Generate and review versioned Firestore indexes and Security Rules.
+- [ ] Add deterministic seeds for permissions and all default system roles.
+- [ ] Seed a configurable development super administrator without production credentials.
+- [ ] Seed the sample organization, church profile, brand kit, campaign, theme, sermon, prayer collection, and declaration.
+- [ ] Document the entity relationships and tenant ownership rules.
 
 ## Phase 3 — Authentication and identity lifecycle
 
-- [ ] Implement email/password registration with normalized-email uniqueness and Argon2id hashing.
-- [ ] Implement email verification and resend-verification with single-use, expiring, hashed tokens.
+- [x] Implement email/password registration through Firebase Authentication with normalized-email uniqueness and a Firestore user profile.
+- [x] Implement Firebase email verification and resend-verification with provider-managed single-use, expiring codes.
 - [ ] Implement login with generic failure responses, account-state checks, brute-force counters, lockout, and security audit events.
-- [ ] Issue short-lived JWT access tokens with issuer, audience, subject, session, active-organization, and token-version claims.
-- [ ] Implement long-lived refresh tokens stored only as hashes and bound to device sessions.
+- [ ] Verify short-lived Firebase ID tokens with signature, issuer, audience, subject, issued-at, expiry, and active-organization claims.
+- [ ] Use Firebase-managed long-lived refresh tokens and device sessions; never persist raw refresh tokens in Firestore.
 - [ ] Implement transactional refresh-token rotation, token-family reuse detection, family revocation, and security notifications.
 - [ ] Implement logout for the current session and optional all-device logout.
 - [ ] Implement session listing and single-session revocation with ownership checks.
-- [ ] Implement forgot/reset password using expiring single-use tokens and enumeration-safe responses.
+- [x] Implement Firebase forgot/reset password using provider-managed expiring single-use codes and enumeration-safe responses.
 - [ ] Revoke existing sessions/tokens after password changes and password resets.
 - [ ] Implement invitation acceptance and safe account linking for existing users.
 - [ ] Implement Google OAuth with state, PKCE, callback validation, account linking, and provider error sanitization.
@@ -88,7 +88,7 @@ This checklist turns the product requirements into an implementation and release
 - [ ] Implement transactional organization onboarding, initial membership, administrator role assignment, defaults, and audit event.
 - [ ] Resolve the active organization exclusively from a verified authenticated session/request context.
 - [ ] Add organization switching that validates active membership and issues/updates the appropriate session context.
-- [ ] Implement a tenant-aware Prisma extension or repository base that requires tenant scope for organization-owned access.
+- [ ] Implement a tenant-aware Firestore repository or repository base that requires tenant scope for organization-owned access.
 - [ ] Prevent unscoped tenant model access in services through code structure and tests.
 - [ ] Add organization membership guard and active membership/status validation.
 - [ ] Validate route/body organization IDs against active membership; never use them as authority.
@@ -100,7 +100,7 @@ This checklist turns the product requirements into an implementation and release
 
 ## Phase 5 — Roles, permissions, and policies
 
-- [x] Seed roles: SuperAdministrator, ChurchAdministrator, SeniorPastor, AssociatePastor, ContentWriter, MediaTeam, Reviewer, Publisher, and Viewer.
+- [ ] Seed roles: SuperAdministrator, ChurchAdministrator, SeniorPastor, AssociatePastor, ContentWriter, MediaTeam, Reviewer, Publisher, and Viewer.
 - [ ] Seed the full permission catalogue, including all permissions listed in the requirements.
 - [ ] Define and document default role-to-permission mappings.
 - [x] Implement `@Roles()` and `@Permissions()` decorators.
@@ -299,7 +299,7 @@ This checklist turns the product requirements into an implementation and release
 - [ ] Add configurable differentiated limits for login, password reset, AI, uploads, publishing, public routes, webhooks, and analytics.
 - [ ] Add CSRF defenses for cookie-authenticated flows, secure cookie attributes, brute-force protection, output serialization, XSS-safe handling, and security event logging.
 - [ ] Add OpenTelemetry-ready request/job/outbound-call instrumentation and a Sentry-compatible error-reporting integration point.
-- [ ] Implement `/health`, `/health/live`, and `/health/ready` for API/process, PostgreSQL, Redis, queues, storage, AI, and practical social-provider checks.
+- [ ] Implement `/health`, `/health/live`, and `/health/ready` for API/process, Firestore, Redis, queues, storage, AI, and practical social-provider checks.
 - [ ] Keep health output bounded and secret-free; separate liveness from dependency readiness.
 - [ ] Add webhook signature/replay, audit redaction, rate-limit, CSRF, log-redaction, and health degradation tests.
 
@@ -328,29 +328,29 @@ This checklist turns the product requirements into an implementation and release
 - [ ] Add migration and seed smoke tests against a fresh database.
 - [ ] Add API/worker startup and graceful-shutdown tests.
 - [ ] Add security regression tests for secret/log leakage, upload spoofing, OAuth/webhook replay, refresh reuse, and authorization bypass.
-- [ ] Set meaningful coverage thresholds and make build, lint, unit, integration, E2E, and Prisma validation required CI checks.
+- [ ] Set meaningful coverage thresholds and make build, lint, unit, integration, E2E, and Firestore rules/index validation required CI checks.
 
 ## Phase 24 — Containers and deployment readiness
 
 - [ ] Create a hardened multi-stage Dockerfile running as non-root with production-only dependencies and a health check.
-- [ ] Complete Docker Compose services for PostgreSQL, Redis, API, worker, migrations, and local object storage if needed.
+- [ ] Complete Docker Compose services for Firebase emulators, Redis, API, and worker, and local object storage if needed.
 - [ ] Add health checks, dependency readiness, persistent development volumes, and explicit networks.
 - [ ] Provide separate API and worker entry points/images or commands.
 - [ ] Ensure API processes are stateless and all files use external object storage.
 - [ ] Implement one-off migration strategy, backward-compatible migration guidance, and rollback/runbook procedures.
-- [ ] Configure graceful shutdown for HTTP, Prisma, Redis, BullMQ workers, and telemetry exporters.
+- [ ] Configure graceful shutdown for HTTP, Firebase requests, Redis, BullMQ workers, and telemetry exporters.
 - [ ] Document horizontal scaling, queue concurrency, connection pooling, resource limits, and autoscaling considerations.
 - [ ] Provide deployment guidance for Render, Azure Container Apps, AWS ECS/Fargate, and Google Cloud Run.
-- [ ] Document production use of managed PostgreSQL, Redis, object storage, secret management/KMS, email, and observability.
+- [ ] Document production use of managed Firestore, Redis, object storage, secret management/KMS, email, and observability.
 - [ ] Add CI/CD stages for dependency install, generation, lint, build, tests, schema validation, image build/scan, migrations, and deployment smoke tests.
 
 ## Final release gate
 
 - [ ] `npm ci` succeeds under Node.js 22+ from a clean checkout.
-- [ ] `npm run prisma:generate` succeeds.
-- [ ] `npm run prisma:validate` succeeds.
-- [ ] Migrations apply successfully to a clean PostgreSQL database.
-- [ ] `npm run seed` succeeds and is safe to rerun where documented.
+- [ ] Firebase configuration and generated API types validate successfully.
+- [ ] Firestore Security Rules and indexes validate successfully.
+- [ ] Firestore indexes and Security Rules deploy successfully to a clean Firebase project.
+- [ ] The Firebase seed command succeeds and is safe to rerun where documented.
 - [ ] `npm run lint` succeeds with no suppressed errors.
 - [ ] `npm run build` succeeds in strict mode.
 - [x] `npm test` succeeds.
@@ -361,7 +361,7 @@ This checklist turns the product requirements into an implementation and release
 - [ ] Swagger loads at `/docs` in enabled environments and is disabled/protected as configured in production.
 - [ ] `/api/v1/health`, `/api/v1/health/live`, and `/api/v1/health/ready` return the expected states.
 - [ ] Queue retry, idempotency, cancellation, missed-schedule recovery, and dead-letter scenarios are verified.
-- [ ] Clean-database migration and seed smoke tests pass in containers.
+- [ ] Clean Firebase Emulator Suite index/rules and seed smoke tests pass in containers.
 - [ ] No secrets, tokens, raw provider errors, or production stack traces appear in API responses, logs, traces, jobs, or audit records.
 - [ ] Every production module is wired into the NestJS dependency graph; no core module is an empty placeholder.
 - [ ] Every required endpoint is implemented, authorized, documented, and covered by tests.
