@@ -22,6 +22,16 @@ describe("legacyApiPathMiddleware", () => {
     expect(rewrite("/auth/firebase").url).toBe("/api/v1/auth/firebase");
   });
 
+  it("routes the legacy API session URL to the versioned endpoint", () => {
+    expect(rewrite("/api/auth/session").url).toBe("/api/v1/auth/session");
+  });
+
+  it("preserves query strings on legacy API-prefixed auth requests", () => {
+    expect(rewrite("/api/auth/session?update=1").url).toBe(
+      "/api/v1/auth/session?update=1",
+    );
+  });
+
   it("preserves query strings while rewriting auth requests", () => {
     expect(rewrite("/auth/me?include=permissions").url).toBe(
       "/api/v1/auth/me?include=permissions",

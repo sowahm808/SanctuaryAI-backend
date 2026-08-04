@@ -72,4 +72,13 @@ export class AuthController {
   me(@CurrentUser() user: FirebaseIdentity) {
     return user;
   }
+  @Get("session")
+  @UseGuards(FirebaseAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: "Return the current authenticated session identity",
+  })
+  session(@CurrentUser() user: FirebaseIdentity) {
+    return user;
+  }
 }

@@ -18,14 +18,16 @@ The API uses Firebase's Identity Toolkit endpoints for registration, sign-in, re
 
 Authentication endpoints are served under `/api/v1/auth`, including
 `POST /api/v1/auth/login`, `POST /api/v1/auth/firebase`, and
-`GET /api/v1/auth/me`. The Firebase endpoint accepts a client-authenticated
+`GET /api/v1/auth/me`. `GET /api/v1/auth/session` is an alias for the current
+verified identity for clients that perform a session check after login. The
+Firebase endpoint accepts a client-authenticated
 Firebase ID token as `{ "idToken": "..." }`, verifies it, and returns the
 authenticated user and access-token metadata. Older clients that call
-the unversioned `/auth/*` paths remain supported and are internally routed to
-the versioned endpoints. A `404 NOT_FOUND` response during login usually means
-the client is posting to a different path (for example `/login`) rather than an
-authentication failure; authentication failures from the login endpoint return
-`401 Unauthorized`.
+the legacy `/auth/*` and `/api/auth/*` paths remain supported and are
+internally routed to the versioned endpoints. A `404 NOT_FOUND` response during
+login usually means the client is posting to a different path (for example
+`/login`) rather than an authentication failure; authentication failures from
+the login endpoint return `401 Unauthorized`.
 
 ## Database
 
