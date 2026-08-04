@@ -7,7 +7,7 @@ export const environmentSchema = Joi.object({
 
   PORT: Joi.number().port().default(3000),
 
-  FIREBASE_PROJECT_ID: Joi.string().min(2).required(),
+  FIREBASE_PROJECT_ID: Joi.string().min(2).default("sanctuaryai-b1012"),
   FIREBASE_API_KEY: Joi.string().min(10).required(),
 
   FIREBASE_CLIENT_EMAIL: Joi.string()

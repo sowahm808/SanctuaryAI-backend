@@ -17,3 +17,20 @@ export class RefreshDto {
 export class EmailDto {
   @IsEmail() email!: string;
 }
+
+export class MfaVerifyDto {
+  @IsString() @MinLength(1) challengeId!: string;
+  @IsString() @MinLength(1) code!: string;
+}
+export class InvitationAcceptDto {
+  @IsString() @MinLength(1) token!: string;
+  @IsString() @MinLength(2) name!: string;
+  @IsString() @MinLength(12) password!: string;
+}
+export class PasswordResetDto {
+  @IsString() @MinLength(1) token!: string;
+  @IsString() @MinLength(12) password!: string;
+}
+export class EmailVerifyDto {
+  @IsString() @MinLength(1) token!: string;
+}
