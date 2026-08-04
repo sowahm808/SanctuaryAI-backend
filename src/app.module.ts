@@ -8,6 +8,9 @@ import { AuthModule } from "./modules/auth/auth.module";
 import { DashboardModule } from "./modules/dashboard/dashboard.module";
 import { HealthController } from "./modules/health/health.controller";
 import { OrganizationsModule } from "./modules/organizations/organizations.module";
+import { JobsModule } from "./modules/jobs/jobs.module";
+import { CampaignsModule } from "./modules/campaigns/campaigns.module";
+import { ThemesModule } from "./modules/themes/themes.module";
 import { SecurityModule } from "./security/security.module";
 @Module({
   imports: [
@@ -34,6 +37,9 @@ import { SecurityModule } from "./security/security.module";
     AuthModule,
     DashboardModule,
     OrganizationsModule,
+    JobsModule,
+    CampaignsModule,
+    ThemesModule,
   ],
   controllers: [HealthController],
 })

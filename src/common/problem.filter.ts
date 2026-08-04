@@ -20,7 +20,11 @@ export class ProblemFilter implements ExceptionFilter {
         ? exception.getResponse()
         : "An unexpected error occurred";
     const detail =
-      typeof value === "string" ? value : "The request could not be completed.";
+      typeof value === "string"
+        ? value
+        : value && typeof value === "object" && "message" in value && typeof value.message === "string"
+          ? value.message
+          : "The request could not be completed.";
     const body = typeof value === "object" && value !== null ? value : {};
     const messages = "message" in body && Array.isArray(body.message)
       ? body.message.filter((message): message is string => typeof message === "string")
@@ -34,6 +38,8 @@ export class ProblemFilter implements ExceptionFilter {
             ? "auth_forbidden"
             : status === 400
               ? "invalid_request"
+            : status === 422
+              ? "validation_failed"
               : "request_failed";
     response
       .status(status)
@@ -42,15 +48,11 @@ export class ProblemFilter implements ExceptionFilter {
         code,
         detail,
         correlationId: requestContext.getStore()?.correlationId,
-        ...(messages.length
-          ? {
-              validation: messages.map((message) => ({
-                field: message.split(" ", 1)[0] ?? "request",
-                code: "invalid",
-                message,
-              })),
-            }
-          : {}),
+        validation: messages.map((message) => ({
+          field: message.split(" ", 1)[0] ?? "request",
+          code: "invalid",
+          message,
+        })),
       });
   }
 }
