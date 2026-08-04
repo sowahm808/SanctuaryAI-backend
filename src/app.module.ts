@@ -7,6 +7,7 @@ import { CorrelationMiddleware } from "./common/correlation.middleware";
 import { AuthModule } from "./modules/auth/auth.module";
 import { DashboardModule } from "./modules/dashboard/dashboard.module";
 import { HealthController } from "./modules/health/health.controller";
+import { OrganizationsModule } from "./modules/organizations/organizations.module";
 import { SecurityModule } from "./security/security.module";
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { SecurityModule } from "./security/security.module";
     SecurityModule,
     AuthModule,
     DashboardModule,
+    OrganizationsModule,
   ],
   controllers: [HealthController],
 })
