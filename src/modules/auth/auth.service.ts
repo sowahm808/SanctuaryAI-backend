@@ -31,6 +31,21 @@ export class AuthService {
     }
   }
 
+  async loginWithFirebase(idToken: string) {
+    const identity = await this.firebase.verifyIdToken(idToken);
+
+    return {
+      user: identity,
+      tokens: {
+        accessToken: idToken,
+        expiresIn: Math.max(
+          0,
+          Number(identity.claims.exp ?? 0) - Math.floor(Date.now() / 1000),
+        ),
+      },
+    };
+  }
+
   async refresh(refreshToken: string) {
     const response = await this.firebase.refresh(refreshToken);
     const identity = await this.firebase.verifyIdToken(response.idToken);

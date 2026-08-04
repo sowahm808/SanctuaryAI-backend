@@ -18,6 +18,10 @@ describe("legacyApiPathMiddleware", () => {
     expect(result.next).toHaveBeenCalledTimes(1);
   });
 
+  it("routes an unversioned Firebase login to the versioned endpoint", () => {
+    expect(rewrite("/auth/firebase").url).toBe("/api/v1/auth/firebase");
+  });
+
   it("preserves query strings while rewriting auth requests", () => {
     expect(rewrite("/auth/me?include=permissions").url).toBe(
       "/api/v1/auth/me?include=permissions",

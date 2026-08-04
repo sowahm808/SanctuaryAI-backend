@@ -8,6 +8,9 @@ export class LoginDto {
   @IsEmail() email!: string;
   @IsString() password!: string;
 }
+export class FirebaseLoginDto {
+  @IsString() @MinLength(1) idToken!: string;
+}
 export class RefreshDto {
   @IsString() refreshToken!: string;
 }
