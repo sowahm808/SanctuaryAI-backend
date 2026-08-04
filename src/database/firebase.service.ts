@@ -40,6 +40,16 @@ export interface FirebaseIdentity {
   claims: Readonly<Record<string, unknown>>;
 }
 
+interface FirestoreDocument {
+  fields?: Record<string, FirestoreValue>;
+}
+
+type FirestoreValue =
+  | { stringValue: string }
+  | { booleanValue: boolean }
+  | { timestampValue: string }
+  | { arrayValue: { values?: FirestoreValue[] } };
+
 const encode = (value: string | Buffer): string =>
   Buffer.from(value).toString("base64url");
 
@@ -332,6 +342,69 @@ export class FirebaseService {
       }
       throw error;
     }
+  }
+
+  async getDocument(path: string): Promise<Record<string, unknown> | undefined> {
+    try {
+      const document = await this.firestoreRequest<FirestoreDocument>(path, {
+        method: "GET",
+      });
+      return this.decodeFields(document.fields ?? {});
+    } catch (error: unknown) {
+      if (
+        error instanceof ServiceUnavailableException &&
+        this.isFirebaseNotFound(error)
+      )
+        return undefined;
+      throw error;
+    }
+  }
+
+  async putDocument(path: string, fields: Record<string, unknown>): Promise<void> {
+    await this.firestoreRequest(path, {
+      method: "PATCH",
+      body: JSON.stringify({ fields: this.encodeFields(fields) }),
+    });
+  }
+
+  async deleteDocument(path: string): Promise<void> {
+    try {
+      await this.firestoreRequest(path, { method: "DELETE" });
+    } catch (error: unknown) {
+      if (
+        error instanceof ServiceUnavailableException &&
+        this.isFirebaseNotFound(error)
+      )
+        return;
+      throw error;
+    }
+  }
+
+  private encodeFields(fields: Record<string, unknown>): Record<string, FirestoreValue> {
+    return Object.fromEntries(
+      Object.entries(fields).map(([key, value]) => [key, this.encodeValue(value)]),
+    );
+  }
+
+  private encodeValue(value: unknown): FirestoreValue {
+    if (typeof value === "boolean") return { booleanValue: value };
+    if (Array.isArray(value)) {
+      return { arrayValue: { values: value.map((item) => this.encodeValue(item)) } };
+    }
+    return { stringValue: String(value) };
+  }
+
+  private decodeFields(fields: Record<string, FirestoreValue>): Record<string, unknown> {
+    return Object.fromEntries(
+      Object.entries(fields).map(([key, value]) => [key, this.decodeValue(value)]),
+    );
+  }
+
+  private decodeValue(value: FirestoreValue): unknown {
+    if ("stringValue" in value) return value.stringValue;
+    if ("booleanValue" in value) return value.booleanValue;
+    if ("timestampValue" in value) return value.timestampValue;
+    return (value.arrayValue.values ?? []).map((item) => this.decodeValue(item));
   }
 
   async health(): Promise<void> {

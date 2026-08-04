@@ -20,19 +20,37 @@ export class ProblemFilter implements ExceptionFilter {
         ? exception.getResponse()
         : "An unexpected error occurred";
     const detail =
-      typeof value === "string" ? value : "Request could not be processed";
+      typeof value === "string" ? value : "The request could not be completed.";
+    const body = typeof value === "object" && value !== null ? value : {};
+    const messages = "message" in body && Array.isArray(body.message)
+      ? body.message.filter((message): message is string => typeof message === "string")
+      : [];
+    const code =
+      "code" in body && typeof body.code === "string"
+        ? body.code.toLowerCase()
+        : status === 401
+          ? "auth_invalid_credential"
+          : status === 403
+            ? "auth_forbidden"
+            : status === 400
+              ? "invalid_request"
+              : "request_failed";
     response
       .status(status)
       .type("application/problem+json")
       .json({
-        type: `https://sanctuaryai.app/errors/${status}`,
-        title:
-          status === 422
-            ? "Validation failed"
-            : (HttpStatus[status] ?? "Error"),
-        status,
+        code,
         detail,
         correlationId: requestContext.getStore()?.correlationId,
+        ...(messages.length
+          ? {
+              validation: messages.map((message) => ({
+                field: message.split(" ", 1)[0] ?? "request",
+                code: "invalid",
+                message,
+              })),
+            }
+          : {}),
       });
   }
 }

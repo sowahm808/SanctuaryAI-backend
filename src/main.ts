@@ -44,7 +44,7 @@ async function bootstrap(): Promise<void> {
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,
-      errorHttpStatusCode: 422,
+      errorHttpStatusCode: 400,
     }),
   );
 

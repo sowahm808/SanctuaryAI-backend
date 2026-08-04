@@ -19,6 +19,11 @@ service cloud.firestore {
       allow read: if signedIn() && resource.data.userId == request.auth.uid;
       allow write: if false;
     }
+    // Application sessions are server-only. Documents are keyed by a digest of
+    // the opaque cookie value, but must still never be exposed to Firebase clients.
+    match /sessions/{sessionId} {
+      allow read, write: if false;
+    }
     match /{collection}/{documentId} {
       allow read: if resource.data.organizationId is string && activeMember(resource.data.organizationId);
       allow create, update, delete: if false;
