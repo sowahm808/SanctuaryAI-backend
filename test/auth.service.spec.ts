@@ -73,6 +73,38 @@ describe("AuthService application sessions", () => {
     expect(firebase.putDocument).not.toHaveBeenCalled();
   });
 
+  it("creates an onboarding session when the user has no organization yet", async () => {
+    const firebase = firebaseMock({
+      getDocument: jest.fn((path: string) =>
+        Promise.resolve(
+          path === "users/firebase-user"
+            ? { displayName: "Pastor Ada", email: "user@example.com" }
+            : undefined,
+        ),
+      ),
+    });
+
+    const result = await new AuthService(firebase).exchangeFirebaseToken("id-token");
+
+    expect(result.sessionToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(result.result).toEqual({
+      status: "authenticated",
+      session: {
+        user: {
+          id: "firebase-user",
+          name: "Pastor Ada",
+          email: "user@example.com",
+          permissions: [],
+        },
+        role: null,
+        organizationId: null,
+        organizationName: null,
+        organizationSetupComplete: false,
+        subscriptionActive: false,
+      },
+    });
+  });
+
   it("re-reads current authorization while restoring a valid session", async () => {
     const firebase = firebaseMock({
       getDocument: jest.fn((path: string) =>

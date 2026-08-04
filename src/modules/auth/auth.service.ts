@@ -144,7 +144,16 @@ export class AuthService {
   ): Promise<AuthSession> {
     const user = await this.firebase.getDocument(`users/${userId}`);
     const organizationId = this.stringValue(user?.activeOrganizationId);
-    if (!organizationId) throw new ForbiddenException("No active organization membership");
+    if (!organizationId) {
+      return {
+        user: this.sessionUser(userId, user, identity, []),
+        role: null,
+        organizationId: null,
+        organizationName: null,
+        organizationSetupComplete: false,
+        subscriptionActive: false,
+      };
+    }
     const membership = await this.firebase.getDocument(
       `memberships/${organizationId}_${userId}`,
     );
@@ -167,20 +176,29 @@ export class AuthService {
       : [];
     const subscriptionStatus = this.stringValue(organization.subscriptionStatus);
     return {
-      user: {
-        id: userId,
-        name: this.stringValue(user?.displayName) || identity?.name || "User",
-        email: this.stringValue(user?.email) || identity?.email || "",
-        ...(typeof user?.avatarUrl === "string" && user.avatarUrl
-          ? { avatarUrl: user.avatarUrl }
-          : {}),
-        permissions,
-      },
+      user: this.sessionUser(userId, user, identity, permissions),
       role: roleValue as Role,
       organizationId,
       organizationName: this.stringValue(organization.name),
       organizationSetupComplete: organization.setupComplete === true,
       subscriptionActive: ["ACTIVE", "TRIAL", "GRACE"].includes(subscriptionStatus),
+    };
+  }
+
+  private sessionUser(
+    userId: string,
+    user: Record<string, unknown> | undefined,
+    identity: { email?: string; name?: string } | undefined,
+    permissions: Permission[],
+  ): AuthSession["user"] {
+    return {
+      id: userId,
+      name: this.stringValue(user?.displayName) || identity?.name || "User",
+      email: this.stringValue(user?.email) || identity?.email || "",
+      ...(typeof user?.avatarUrl === "string" && user.avatarUrl
+        ? { avatarUrl: user.avatarUrl }
+        : {}),
+      permissions,
     };
   }
 
