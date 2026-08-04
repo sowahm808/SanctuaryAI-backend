@@ -45,6 +45,8 @@ export class AuthController {
   }
   @Post("resend-verification")
   @HttpCode(202)
+  @UseGuards(FirebaseAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({ summary: "Request another Firebase verification email" })
   resend(@Headers("authorization") authorization?: string) {
     return this.auth.resendVerification(

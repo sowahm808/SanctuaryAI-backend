@@ -159,8 +159,12 @@ export class FirebaseService {
   }
 
   async refresh(refreshToken: string): Promise<FirebaseAuthResponse> {
+    const emulator = this.config.get<string>("FIREBASE_AUTH_EMULATOR_HOST");
+    const base = emulator
+      ? `http://${emulator}/securetoken.googleapis.com/v1`
+      : "https://securetoken.googleapis.com/v1";
     const response = await this.json<FirebaseRefreshResponse>(
-      `https://securetoken.googleapis.com/v1/token?key=${encodeURIComponent(this.apiKey)}`,
+      `${base}/token?key=${encodeURIComponent(this.apiKey)}`,
       {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -234,16 +238,24 @@ export class FirebaseService {
     } catch {
       throw new UnauthorizedException("Invalid Firebase ID token");
     }
-    if (header.alg !== "RS256" || !header.kid)
-      throw new UnauthorizedException("Invalid Firebase ID token");
-    const certs = await this.googleCertificates();
-    const certificate = certs[header.kid];
-    const verifier = createVerify("RSA-SHA256");
-    verifier.update(`${parts[0]}.${parts[1]}`);
+    const emulator = this.config.get<string>("FIREBASE_AUTH_EMULATOR_HOST");
+    let signatureValid = false;
+    if (emulator) {
+      // The Auth emulator deliberately issues unsigned JWTs. Only trust that
+      // format when the emulator has been explicitly configured.
+      signatureValid = header.alg === "none" && parts[2] === "";
+    } else if (header.alg === "RS256" && header.kid) {
+      const certs = await this.googleCertificates();
+      const certificate = certs[header.kid];
+      if (certificate) {
+        const verifier = createVerify("RSA-SHA256");
+        verifier.update(`${parts[0]}.${parts[1]}`);
+        signatureValid = verifier.verify(certificate, parts[2], "base64url");
+      }
+    }
     const now = Math.floor(Date.now() / 1000);
     const valid =
-      certificate &&
-      verifier.verify(certificate, parts[2], "base64url") &&
+      signatureValid &&
       claims.aud === this.projectId &&
       claims.iss === `https://securetoken.google.com/${this.projectId}` &&
       typeof claims.sub === "string" &&
