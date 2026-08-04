@@ -5,11 +5,15 @@ import {
   Headers,
   HttpCode,
   Post,
+  Res,
   UseGuards,
 } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
+import type { Response } from "express";
 import {
   CurrentUser,
+  FIREBASE_SESSION_COOKIE,
   FirebaseAuthGuard,
 } from "../../security/firebase-auth.guard";
 import { FirebaseIdentity } from "../../database/firebase.service";
@@ -25,29 +29,68 @@ import {
 @ApiTags("Authentication")
 @Controller("auth")
 export class AuthController {
-  constructor(private readonly auth: AuthService) {}
+  constructor(
+    private readonly auth: AuthService,
+    private readonly config: ConfigService,
+  ) {}
   @Post("register")
   @ApiOperation({ summary: "Create a Firebase email/password account" })
-  register(@Body() dto: RegisterDto) {
-    return this.auth.register(dto);
+  async register(
+    @Body() dto: RegisterDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const result = await this.auth.register(dto);
+    this.setSessionCookie(
+      response,
+      result.tokens.accessToken,
+      result.tokens.expiresIn,
+    );
+    return result;
   }
   @Post("login")
   @HttpCode(200)
   @ApiOperation({ summary: "Sign in through Firebase Authentication" })
-  login(@Body() dto: LoginDto) {
-    return this.auth.login(dto);
+  async login(
+    @Body() dto: LoginDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const result = await this.auth.login(dto);
+    this.setSessionCookie(
+      response,
+      result.tokens.accessToken,
+      result.tokens.expiresIn,
+    );
+    return result;
   }
   @Post("firebase")
   @HttpCode(200)
   @ApiOperation({ summary: "Authenticate with a Firebase ID token" })
-  firebase(@Body() dto: FirebaseLoginDto) {
-    return this.auth.loginWithFirebase(dto.idToken);
+  async firebase(
+    @Body() dto: FirebaseLoginDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const result = await this.auth.loginWithFirebase(dto.idToken);
+    this.setSessionCookie(
+      response,
+      result.tokens.accessToken,
+      result.tokens.expiresIn,
+    );
+    return result;
   }
   @Post("refresh")
   @HttpCode(200)
   @ApiOperation({ summary: "Exchange a Firebase refresh token" })
-  refresh(@Body() dto: RefreshDto) {
-    return this.auth.refresh(dto.refreshToken);
+  async refresh(
+    @Body() dto: RefreshDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const result = await this.auth.refresh(dto.refreshToken);
+    this.setSessionCookie(
+      response,
+      result.tokens.accessToken,
+      result.tokens.expiresIn,
+    );
+    return result;
   }
   @Post("forgot-password")
   @HttpCode(202)
@@ -80,5 +123,19 @@ export class AuthController {
   })
   session(@CurrentUser() user: FirebaseIdentity) {
     return user;
+  }
+
+  private setSessionCookie(
+    response: Response,
+    idToken: string,
+    expiresIn: number,
+  ): void {
+    response.cookie(FIREBASE_SESSION_COOKIE, idToken, {
+      httpOnly: true,
+      secure: this.config.get<string>("NODE_ENV") === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: Math.max(0, expiresIn) * 1000,
+    });
   }
 }
