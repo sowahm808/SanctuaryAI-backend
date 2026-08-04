@@ -14,15 +14,29 @@ For a production-style local run, use `npm start`. Its `prestart` lifecycle
 automatically compiles the TypeScript sources before Node.js launches
 `dist/main.js`, so a fresh checkout does not require a separate manual build.
 
-The API uses Firebase's Identity Toolkit endpoints for registration, sign-in, refresh, verification email, and password-reset email. Protected endpoints accept `Authorization: Bearer <Firebase ID token>` or the HTTP-only `__session` cookie issued by the authentication endpoints. Browser clients must send credentials when the frontend and API have different origins. The backend validates signatures, issuer, audience, subject, issue time, and expiry against Google's published Firebase certificates. Never use a decoded-but-unverified token as request context.
+The API uses Firebase's Identity Toolkit endpoints for the legacy registration,
+sign-in, refresh, verification-email, and password-reset-email operations. The
+active browser flow posts a Firebase ID token to `POST /api/v1/auth/firebase`.
+After verifying the token, the backend resolves the user's active membership and
+organization and returns the canonical application session. It stores only a
+SHA-256 digest of a random application session identifier in Firestore and sets
+the identifier in an HTTP-only `__session` cookie; the Firebase token and
+authorization claims are never placed in that cookie.
+
+`GET /api/v1/auth/session` restores that application session and re-reads the
+current membership, organization, permissions, onboarding state, and
+subscription state. `POST /api/v1/auth/logout` deletes the session and expires
+the cookie, and is safe to call repeatedly. Browser clients must send
+credentials. The backend validates Firebase signatures, issuer, audience,
+subject, issue time, and expiry against Google's published certificates. Never
+use a decoded-but-unverified token as request context.
 
 Authentication endpoints are served under `/api/v1/auth`, including
-`POST /api/v1/auth/login`, `POST /api/v1/auth/firebase/exchange`, and
-`GET /api/v1/auth/me`. `GET /api/v1/auth/session` is an alias for the current
-verified identity for clients that perform a session check after login. The
-Firebase endpoint accepts a client-authenticated
-Firebase ID token as `{ "idToken": "..." }`, verifies it, and returns the
-authenticated user and access-token metadata. Older clients that call
+`POST /api/v1/auth/login`, `POST /api/v1/auth/firebase`, and
+`GET /api/v1/auth/session`. The Firebase endpoint accepts a client-authenticated
+Firebase ID token as `{ "idToken": "..." }`, verifies it, and returns an
+unwrapped `AuthResult`; session restoration returns an unwrapped `AuthSession`.
+Older clients that call
 the legacy `/auth/*` and `/api/auth/*` paths remain supported and are
 internally routed to the versioned endpoints. A `404 NOT_FOUND` response during
 login usually means the client is posting to a different path (for example
