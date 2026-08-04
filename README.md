@@ -17,7 +17,7 @@ automatically compiles the TypeScript sources before Node.js launches
 The API uses Firebase's Identity Toolkit endpoints for registration, sign-in, refresh, verification email, and password-reset email. Protected endpoints accept `Authorization: Bearer <Firebase ID token>` or the HTTP-only `__session` cookie issued by the authentication endpoints. Browser clients must send credentials when the frontend and API have different origins. The backend validates signatures, issuer, audience, subject, issue time, and expiry against Google's published Firebase certificates. Never use a decoded-but-unverified token as request context.
 
 Authentication endpoints are served under `/api/v1/auth`, including
-`POST /api/v1/auth/login`, `POST /api/v1/auth/firebase`, and
+`POST /api/v1/auth/login`, `POST /api/v1/auth/firebase/exchange`, and
 `GET /api/v1/auth/me`. `GET /api/v1/auth/session` is an alias for the current
 verified identity for clients that perform a session check after login. The
 Firebase endpoint accepts a client-authenticated

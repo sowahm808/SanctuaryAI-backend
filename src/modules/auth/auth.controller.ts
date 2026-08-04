@@ -77,6 +77,21 @@ export class AuthController {
     );
     return result;
   }
+  @Post("firebase/exchange")
+  @HttpCode(200)
+  @ApiOperation({ summary: "Exchange a Firebase ID token for an app session" })
+  async exchangeFirebaseToken(
+    @Body() dto: FirebaseLoginDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const result = await this.auth.exchangeFirebaseToken(dto.idToken);
+    this.setSessionCookie(
+      response,
+      result.tokens.accessToken,
+      result.tokens.expiresIn,
+    );
+    return result;
+  }
   @Post("refresh")
   @HttpCode(200)
   @ApiOperation({ summary: "Exchange a Firebase refresh token" })
