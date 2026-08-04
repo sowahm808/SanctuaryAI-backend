@@ -1,5 +1,8 @@
 import { ConfigService } from "@nestjs/config";
-import { UnauthorizedException } from "@nestjs/common";
+import {
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from "@nestjs/common";
 import { FirebaseService } from "../src/database/firebase.service";
 
 const token = (claims: Record<string, unknown>): string => {
@@ -115,5 +118,37 @@ describe("FirebaseService authentication emulator support", () => {
         }),
       ),
     ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it("creates a user profile when Firestore reports a missing document", async () => {
+    const service = new FirebaseService(config(values));
+    const identity = {
+      uid: "new-user",
+      email: "new@example.com",
+      emailVerified: true,
+      name: "New User",
+      claims: {},
+    };
+    const firestoreRequest = jest
+      .spyOn(service, "firestoreRequest")
+      .mockRejectedValueOnce(
+        new ServiceUnavailableException({
+          code: "FIREBASE_ERROR",
+          message: "Document not found.",
+          firebaseStatus: "NOT_FOUND",
+          firebaseStatusCode: 404,
+        }),
+      )
+      .mockResolvedValueOnce({});
+
+    await expect(service.ensureUserProfile(identity)).resolves.toBeUndefined();
+    expect(firestoreRequest).toHaveBeenNthCalledWith(1, "users/new-user", {
+      method: "GET",
+    });
+    expect(firestoreRequest).toHaveBeenNthCalledWith(
+      2,
+      "users/new-user",
+      expect.objectContaining({ method: "PATCH" }),
+    );
   });
 });
