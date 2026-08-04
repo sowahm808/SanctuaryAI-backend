@@ -15,15 +15,23 @@ export interface AuthenticatedRequest extends Request {
   user?: FirebaseIdentity;
 }
 
+export const FIREBASE_SESSION_COOKIE = "__session";
+
 @Injectable()
 export class FirebaseAuthGuard implements CanActivate {
   constructor(private readonly firebase: FirebaseService) {}
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const match = /^Bearer\s+(.+)$/i.exec(request.headers.authorization ?? "");
-    if (!match)
-      throw new UnauthorizedException("A Firebase bearer token is required");
-    request.user = await this.firebase.verifyIdToken(match[1]);
+    const cookieToken = (
+      request.cookies as Record<string, unknown> | undefined
+    )?.[FIREBASE_SESSION_COOKIE];
+    const token =
+      match?.[1] ??
+      (typeof cookieToken === "string" ? cookieToken : undefined);
+    if (!token)
+      throw new UnauthorizedException("A Firebase authentication token is required");
+    request.user = await this.firebase.verifyIdToken(token);
     return true;
   }
 }

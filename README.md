@@ -14,7 +14,7 @@ For a production-style local run, use `npm start`. Its `prestart` lifecycle
 automatically compiles the TypeScript sources before Node.js launches
 `dist/main.js`, so a fresh checkout does not require a separate manual build.
 
-The API uses Firebase's Identity Toolkit endpoints for registration, sign-in, refresh, verification email, and password-reset email. Protected endpoints require `Authorization: Bearer <Firebase ID token>`. The backend validates signatures, issuer, audience, subject, issue time, and expiry against Google's published Firebase certificates. Never use a decoded-but-unverified token as request context.
+The API uses Firebase's Identity Toolkit endpoints for registration, sign-in, refresh, verification email, and password-reset email. Protected endpoints accept `Authorization: Bearer <Firebase ID token>` or the HTTP-only `__session` cookie issued by the authentication endpoints. Browser clients must send credentials when the frontend and API have different origins. The backend validates signatures, issuer, audience, subject, issue time, and expiry against Google's published Firebase certificates. Never use a decoded-but-unverified token as request context.
 
 Authentication endpoints are served under `/api/v1/auth`, including
 `POST /api/v1/auth/login`, `POST /api/v1/auth/firebase`, and
