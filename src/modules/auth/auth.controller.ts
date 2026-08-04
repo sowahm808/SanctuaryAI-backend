@@ -14,7 +14,13 @@ import {
 } from "../../security/firebase-auth.guard";
 import { FirebaseIdentity } from "../../database/firebase.service";
 import { AuthService } from "./auth.service";
-import { EmailDto, LoginDto, RefreshDto, RegisterDto } from "./dto";
+import {
+  EmailDto,
+  FirebaseLoginDto,
+  LoginDto,
+  RefreshDto,
+  RegisterDto,
+} from "./dto";
 
 @ApiTags("Authentication")
 @Controller("auth")
@@ -30,6 +36,12 @@ export class AuthController {
   @ApiOperation({ summary: "Sign in through Firebase Authentication" })
   login(@Body() dto: LoginDto) {
     return this.auth.login(dto);
+  }
+  @Post("firebase")
+  @HttpCode(200)
+  @ApiOperation({ summary: "Authenticate with a Firebase ID token" })
+  firebase(@Body() dto: FirebaseLoginDto) {
+    return this.auth.loginWithFirebase(dto.idToken);
   }
   @Post("refresh")
   @HttpCode(200)

@@ -17,7 +17,10 @@ automatically compiles the TypeScript sources before Node.js launches
 The API uses Firebase's Identity Toolkit endpoints for registration, sign-in, refresh, verification email, and password-reset email. Protected endpoints require `Authorization: Bearer <Firebase ID token>`. The backend validates signatures, issuer, audience, subject, issue time, and expiry against Google's published Firebase certificates. Never use a decoded-but-unverified token as request context.
 
 Authentication endpoints are served under `/api/v1/auth`, including
-`POST /api/v1/auth/login` and `GET /api/v1/auth/me`. Older clients that call
+`POST /api/v1/auth/login`, `POST /api/v1/auth/firebase`, and
+`GET /api/v1/auth/me`. The Firebase endpoint accepts a client-authenticated
+Firebase ID token as `{ "idToken": "..." }`, verifies it, and returns the
+authenticated user and access-token metadata. Older clients that call
 the unversioned `/auth/*` paths remain supported and are internally routed to
 the versioned endpoints. A `404 NOT_FOUND` response during login usually means
 the client is posting to a different path (for example `/login`) rather than an
