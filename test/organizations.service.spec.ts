@@ -31,6 +31,11 @@ describe("OrganizationsService", () => {
     const result = await new OrganizationsService(firebase).create(identity, {
       name: " Grace Church ",
       timezone: "America/New_York",
+      seniorPastor: " Pastor Ada ",
+      slogan: " Grace changes everything ",
+      primaryColor: "#3761a4",
+      bibleTranslation: " NKJV ",
+      doctrinalGuidelines: " Statement of faith ",
     });
 
     expect(result.organization).toEqual(
@@ -40,6 +45,11 @@ describe("OrganizationsService", () => {
         setupComplete: false,
         subscriptionStatus: "TRIAL",
         timezone: "America/New_York",
+        seniorPastor: "Pastor Ada",
+        slogan: "Grace changes everything",
+        primaryColor: "#3761a4",
+        bibleTranslation: "NKJV",
+        doctrinalGuidelines: "Statement of faith",
       }),
     );
     expect(result.membership).toEqual(
@@ -53,7 +63,15 @@ describe("OrganizationsService", () => {
     );
     expect(firebase.putDocument).toHaveBeenCalledWith(
       `organizations/${result.organization.id}`,
-      expect.objectContaining({ name: "Grace Church", createdBy: "firebase-user" }),
+      expect.objectContaining({
+        name: "Grace Church",
+        seniorPastor: "Pastor Ada",
+        slogan: "Grace changes everything",
+        primaryColor: "#3761a4",
+        bibleTranslation: "NKJV",
+        doctrinalGuidelines: "Statement of faith",
+        createdBy: "firebase-user",
+      }),
     );
     expect(firebase.putDocument).toHaveBeenCalledWith(
       `memberships/${result.organization.id}_firebase-user`,

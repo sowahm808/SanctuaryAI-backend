@@ -12,6 +12,11 @@ export interface CreatedOrganizationResult {
     setupComplete: boolean;
     subscriptionStatus: string;
     timezone: string;
+    seniorPastor?: string;
+    slogan?: string;
+    primaryColor?: string;
+    bibleTranslation?: string;
+    doctrinalGuidelines?: string;
   };
   membership: {
     id: string;
@@ -46,12 +51,23 @@ export class OrganizationsService {
     const timezone = dto.timezone?.trim() || "UTC";
     const permissions = [...PERMISSIONS];
 
+    const seniorPastor = this.trimOptional(dto.seniorPastor);
+    const slogan = this.trimOptional(dto.slogan);
+    const primaryColor = this.trimOptional(dto.primaryColor);
+    const bibleTranslation = this.trimOptional(dto.bibleTranslation);
+    const doctrinalGuidelines = this.trimOptional(dto.doctrinalGuidelines);
+
     const organization = {
       id: organizationId,
       name,
       setupComplete: false,
       subscriptionStatus: "TRIAL",
       timezone,
+      ...(seniorPastor ? { seniorPastor } : {}),
+      ...(slogan ? { slogan } : {}),
+      ...(primaryColor ? { primaryColor } : {}),
+      ...(bibleTranslation ? { bibleTranslation } : {}),
+      ...(doctrinalGuidelines ? { doctrinalGuidelines } : {}),
       createdBy: user.uid,
       createdAt: now,
       updatedAt: now,
@@ -86,6 +102,15 @@ export class OrganizationsService {
         setupComplete: organization.setupComplete,
         subscriptionStatus: organization.subscriptionStatus,
         timezone: organization.timezone,
+        ...(organization.seniorPastor ? { seniorPastor: organization.seniorPastor } : {}),
+        ...(organization.slogan ? { slogan: organization.slogan } : {}),
+        ...(organization.primaryColor ? { primaryColor: organization.primaryColor } : {}),
+        ...(organization.bibleTranslation
+          ? { bibleTranslation: organization.bibleTranslation }
+          : {}),
+        ...(organization.doctrinalGuidelines
+          ? { doctrinalGuidelines: organization.doctrinalGuidelines }
+          : {}),
       },
       membership: {
         id: membership.id,
@@ -96,5 +121,9 @@ export class OrganizationsService {
         permissions: membership.permissions,
       },
     };
+  }
+
+  private trimOptional(value: string | undefined): string | undefined {
+    return value?.trim() || undefined;
   }
 }
