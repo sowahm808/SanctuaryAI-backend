@@ -32,6 +32,12 @@ describe("legacyApiPathMiddleware", () => {
     );
   });
 
+  it("routes unversioned API dashboard requests to the versioned endpoint", () => {
+    expect(rewrite("/api/dashboard/summary").url).toBe(
+      "/api/v1/dashboard/summary",
+    );
+  });
+
   it("preserves query strings while rewriting auth requests", () => {
     expect(rewrite("/auth/me?include=permissions").url).toBe(
       "/api/v1/auth/me?include=permissions",
