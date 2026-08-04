@@ -10,6 +10,7 @@ import {
   FirebaseIdentity,
   FirebaseService,
 } from "../database/firebase.service";
+import { createHash } from "node:crypto";
 
 export interface AuthenticatedRequest extends Request {
   user?: FirebaseIdentity;
@@ -26,13 +27,42 @@ export class FirebaseAuthGuard implements CanActivate {
     const cookieToken = (
       request.cookies as Record<string, unknown> | undefined
     )?.[FIREBASE_SESSION_COOKIE];
-    const token =
-      match?.[1] ??
-      (typeof cookieToken === "string" ? cookieToken : undefined);
+    const bearerToken = match?.[1];
+    const sessionToken = typeof cookieToken === "string" ? cookieToken : undefined;
+    const token = bearerToken ?? sessionToken;
     if (!token)
       throw new UnauthorizedException("A Firebase authentication token is required");
-    request.user = await this.firebase.verifyIdToken(token);
+    request.user = bearerToken
+      ? await this.firebase.verifyIdToken(bearerToken)
+      : await this.resolveSessionCookie(token);
     return true;
+  }
+
+  private async resolveSessionCookie(token: string): Promise<FirebaseIdentity> {
+    try {
+      return await this.firebase.verifyIdToken(token);
+    } catch (error) {
+      const session = await this.firebase.getDocument(
+        `sessions/${createHash("sha256").update(token).digest("hex")}`,
+      );
+      const expiresAt = Date.parse(this.stringValue(session?.expiresAt));
+      const userId = this.stringValue(session?.userId);
+      if (!session || !userId || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+        throw error;
+      }
+      const user = await this.firebase.getDocument(`users/${userId}`);
+      return {
+        uid: userId,
+        email: this.stringValue(user?.email) || undefined,
+        emailVerified: user?.emailVerified === true,
+        name: this.stringValue(user?.displayName) || undefined,
+        claims: {},
+      };
+    }
+  }
+
+  private stringValue(value: unknown): string {
+    return typeof value === "string" ? value : "";
   }
 }
 
