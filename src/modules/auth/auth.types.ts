@@ -36,9 +36,9 @@ export interface AuthSession {
     avatarUrl?: string;
     permissions: Permission[];
   };
-  role: Role;
-  organizationId: string;
-  organizationName: string;
+  role: Role | null;
+  organizationId: string | null;
+  organizationName: string | null;
   organizationSetupComplete: boolean;
   subscriptionActive: boolean;
 }

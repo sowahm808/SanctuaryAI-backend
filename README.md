@@ -23,6 +23,11 @@ SHA-256 digest of a random application session identifier in Firestore and sets
 the identifier in an HTTP-only `__session` cookie; the Firebase token and
 authorization claims are never placed in that cookie.
 
+Verified users who have not created or joined an organization receive an
+authenticated onboarding session with null organization and role fields, empty
+permissions, and inactive setup/subscription flags. Invalid, suspended, or
+unsupported existing memberships remain forbidden.
+
 `GET /api/v1/auth/session` restores that application session and re-reads the
 current membership, organization, permissions, onboarding state, and
 subscription state. `POST /api/v1/auth/logout` deletes the session and expires
