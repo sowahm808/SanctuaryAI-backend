@@ -16,6 +16,14 @@ automatically compiles the TypeScript sources before Node.js launches
 
 The API uses Firebase's Identity Toolkit endpoints for registration, sign-in, refresh, verification email, and password-reset email. Protected endpoints require `Authorization: Bearer <Firebase ID token>`. The backend validates signatures, issuer, audience, subject, issue time, and expiry against Google's published Firebase certificates. Never use a decoded-but-unverified token as request context.
 
+Authentication endpoints are served under `/api/v1/auth`, including
+`POST /api/v1/auth/login` and `GET /api/v1/auth/me`. Older clients that call
+the unversioned `/auth/*` paths remain supported and are internally routed to
+the versioned endpoints. A `404 NOT_FOUND` response during login usually means
+the client is posting to a different path (for example `/login`) rather than an
+authentication failure; authentication failures from the login endpoint return
+`401 Unauthorized`.
+
 ## Database
 
 All application persistence goes through `FirebaseService.firestoreRequest`. It obtains short-lived Google OAuth access tokens from the configured service account; no long-lived database bearer token is stored. Tenant-owned Firestore documents must retain an `organizationId`, and services must derive that value from authenticated membership rather than request bodies. Firestore Security Rules remain defense in depth: Admin/service-account requests bypass them, so backend authorization is mandatory.

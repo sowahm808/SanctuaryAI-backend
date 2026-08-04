@@ -5,11 +5,12 @@ import { ConfigService } from "@nestjs/config";
 import { SwaggerModule, DocumentBuilder } from "@nestjs/swagger";
 
 import helmet from "helmet";
-import compression = require("compression");
-import cookieParser = require("cookie-parser");
+import compression from "compression";
+import cookieParser from "cookie-parser";
 
 import { AppModule } from "./app.module";
 import { EnvelopeInterceptor } from "./common/envelope.interceptor";
+import { legacyApiPathMiddleware } from "./common/legacy-api-path.middleware";
 import { ProblemFilter } from "./common/problem.filter";
 
 async function bootstrap(): Promise<void> {
@@ -19,6 +20,8 @@ async function bootstrap(): Promise<void> {
 
   const config = app.get(ConfigService);
 
+  // Keep existing clients functional while they migrate to versioned URLs.
+  app.use(legacyApiPathMiddleware);
   app.setGlobalPrefix("api/v1");
 
   app.use(helmet());
