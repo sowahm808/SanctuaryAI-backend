@@ -32,7 +32,12 @@ export class AuthService {
   }
 
   async loginWithFirebase(idToken: string) {
+    return this.exchangeFirebaseToken(idToken);
+  }
+
+  async exchangeFirebaseToken(idToken: string) {
     const identity = await this.firebase.verifyIdToken(idToken);
+    await this.firebase.ensureUserProfile(identity);
 
     return {
       user: identity,

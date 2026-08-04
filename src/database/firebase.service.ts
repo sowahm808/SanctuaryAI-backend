@@ -317,6 +317,21 @@ export class FirebaseService {
     });
   }
 
+  async ensureUserProfile(identity: FirebaseIdentity): Promise<void> {
+    try {
+      await this.firestoreRequest(`users/${identity.uid}`, { method: "GET" });
+    } catch (error: unknown) {
+      if (
+        error instanceof ServiceUnavailableException &&
+        JSON.stringify(error.getResponse()).includes("NOT_FOUND")
+      ) {
+        await this.createUserProfile(identity, identity.name?.trim() || "User");
+        return;
+      }
+      throw error;
+    }
+  }
+
   async health(): Promise<void> {
     await this.firestoreRequest(`health/${randomUUID()}`, {
       method: "GET",
