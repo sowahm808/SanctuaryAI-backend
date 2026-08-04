@@ -1,129 +1,81 @@
-import { ConflictException, Injectable } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import { FirebaseIdentity } from "../../database/firebase.service";
-import { FirebaseService } from "../../database/firebase.service";
-import { PERMISSIONS } from "../auth/auth.types";
-import { CreateOrganizationDto } from "./dto";
+import { FirebaseIdentity, FirebaseService } from "../../database/firebase.service";
+import { requestContext } from "../../common/request-context";
+import { PERMISSIONS, ROLES } from "../auth/auth.types";
+import { CreateOrganizationDto, InvitationDto, OnboardingDraftDto, PatchOrganizationDto, SocialHandoffDto } from "./dto";
 
-export interface CreatedOrganizationResult {
-  organization: {
-    id: string;
-    name: string;
-    setupComplete: boolean;
-    subscriptionStatus: string;
-    timezone: string;
-    seniorPastor?: string;
-    slogan?: string;
-    primaryColor?: string;
-    bibleTranslation?: string;
-    doctrinalGuidelines?: string;
-  };
-  membership: {
-    id: string;
-    organizationId: string;
-    userId: string;
-    role: string;
-    status: string;
-    permissions: string[];
-  };
-}
+type RecordValue = Record<string, unknown>;
+
+export interface CreatedOrganizationResult { organization: RecordValue & { id: string; name?: string }; membership: RecordValue; role: string; permissions: string[]; subscriptionStatus: string; onboardingStatus: string; nextActionUrl?: string; recoveryMessages: string[]; }
 
 @Injectable()
 export class OrganizationsService {
   constructor(private readonly firebase: FirebaseService) {}
 
-  async create(
-    user: FirebaseIdentity,
-    dto: CreateOrganizationDto,
-  ): Promise<CreatedOrganizationResult> {
+  async create(user: FirebaseIdentity, dto: CreateOrganizationDto): Promise<CreatedOrganizationResult> {
+    if ((dto.setupMode ?? "create") === "join") return this.join(user, dto);
     const existingUser = await this.firebase.getDocument(`users/${user.uid}`);
-    if (typeof existingUser?.activeOrganizationId === "string") {
-      throw new ConflictException({
-        code: "organization_already_selected",
-        message: "The user already has an active organization.",
-      });
-    }
+    if (typeof existingUser?.activeOrganizationId === "string") throw new ConflictException({ code: "organization_already_selected", message: "The user already has an active organization." });
+    return this.createOrganization(user, dto, existingUser, false);
+  }
 
+  async current(user: FirebaseIdentity): Promise<RecordValue> { const { organization } = await this.active(user, "settings.manage"); return this.profile(organization); }
+
+  async patchCurrent(user: FirebaseIdentity, dto: PatchOrganizationDto): Promise<RecordValue> {
+    const { organization, organizationId } = await this.active(user, "settings.manage");
+    if (this.stringValue(organization.revision) !== dto.revision) throw new ConflictException({ code: "revision_conflict", message: "The organization was updated by someone else.", currentRevision: this.stringValue(organization.revision) });
     const now = new Date().toISOString();
-    const organizationId = randomUUID();
-    const membershipId = `${organizationId}_${user.uid}`;
-    const name = dto.name.trim();
-    const timezone = dto.timezone?.trim() || "UTC";
-    const permissions = [...PERMISSIONS];
-
-    const seniorPastor = this.trimOptional(dto.seniorPastor);
-    const slogan = this.trimOptional(dto.slogan);
-    const primaryColor = this.trimOptional(dto.primaryColor);
-    const bibleTranslation = this.trimOptional(dto.bibleTranslation);
-    const doctrinalGuidelines = this.trimOptional(dto.doctrinalGuidelines);
-
-    const organization = {
-      id: organizationId,
-      name,
-      setupComplete: false,
-      subscriptionStatus: "TRIAL",
-      timezone,
-      ...(seniorPastor ? { seniorPastor } : {}),
-      ...(slogan ? { slogan } : {}),
-      ...(primaryColor ? { primaryColor } : {}),
-      ...(bibleTranslation ? { bibleTranslation } : {}),
-      ...(doctrinalGuidelines ? { doctrinalGuidelines } : {}),
-      createdBy: user.uid,
-      createdAt: now,
-      updatedAt: now,
-    };
-    const membership = {
-      id: membershipId,
-      organizationId,
-      userId: user.uid,
-      role: "ChurchAdministrator",
-      status: "ACTIVE",
-      permissions,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    await this.firebase.putDocument(`organizations/${organizationId}`, organization);
-    await this.firebase.putDocument(`memberships/${membershipId}`, membership);
-    await this.firebase.putDocument(`users/${user.uid}`, {
-      ...(existingUser ?? {}),
-      uid: user.uid,
-      email: existingUser?.email ?? user.email ?? "",
-      displayName: existingUser?.displayName ?? user.name ?? "User",
-      status: existingUser?.status ?? "ACTIVE",
-      activeOrganizationId: organizationId,
-      updatedAt: now,
-    });
-
-    return {
-      organization: {
-        id: organization.id,
-        name: organization.name,
-        setupComplete: organization.setupComplete,
-        subscriptionStatus: organization.subscriptionStatus,
-        timezone: organization.timezone,
-        ...(organization.seniorPastor ? { seniorPastor: organization.seniorPastor } : {}),
-        ...(organization.slogan ? { slogan: organization.slogan } : {}),
-        ...(organization.primaryColor ? { primaryColor: organization.primaryColor } : {}),
-        ...(organization.bibleTranslation
-          ? { bibleTranslation: organization.bibleTranslation }
-          : {}),
-        ...(organization.doctrinalGuidelines
-          ? { doctrinalGuidelines: organization.doctrinalGuidelines }
-          : {}),
-      },
-      membership: {
-        id: membership.id,
-        organizationId: membership.organizationId,
-        userId: membership.userId,
-        role: membership.role,
-        status: membership.status,
-        permissions: membership.permissions,
-      },
-    };
+    const revision = randomUUID();
+    const updated = { ...organization, ...this.profileFields(dto), revision, updatedAt: now };
+    await this.firebase.putDocument(`organizations/${organizationId}`, updated);
+    await this.audit(user, organizationId, "organization.update", "success", { fields: Object.keys(this.profileFields(dto)) });
+    return this.profile(updated);
   }
 
-  private trimOptional(value: string | undefined): string | undefined {
-    return value?.trim() || undefined;
+  async getDraft(user: FirebaseIdentity): Promise<RecordValue> {
+    const draft = await this.firebase.getDocument(`onboardingDrafts/${user.uid}`);
+    return draft ?? { payload: {}, stepIndex: 0, validationByStep: {}, revision: "0" };
   }
+
+  async putDraft(user: FirebaseIdentity, dto: OnboardingDraftDto): Promise<RecordValue> {
+    const existing = await this.firebase.getDocument(`onboardingDrafts/${user.uid}`);
+    if (existing && dto.revision && this.stringValue(existing.revision) !== dto.revision) throw new ConflictException({ code: "revision_conflict", message: "The onboarding draft is stale.", currentRevision: this.stringValue(existing.revision) });
+    const now = new Date().toISOString(); const revision = randomUUID();
+    const draft = { id: user.uid, userId: user.uid, payload: dto.payload, stepIndex: dto.stepIndex, validationByStep: dto.validationByStep ?? {}, revision, idempotencyKey: dto.idempotencyKey ?? "", updatedAt: now };
+    await this.firebase.putDocument(`onboardingDrafts/${user.uid}`, draft);
+    return draft;
+  }
+
+  async completeOnboarding(user: FirebaseIdentity): Promise<CreatedOrganizationResult> {
+    const draft = await this.getDraft(user); const payload = (draft.payload ?? {}) as CreateOrganizationDto;
+    if (!payload.name || typeof payload.name !== "string") throw new BadRequestException({ code: "onboarding_invalid", message: "Organization name is required." });
+    const existingUser = await this.firebase.getDocument(`users/${user.uid}`);
+    const result = await this.createOrganization(user, { ...payload, setupMode: payload.setupMode ?? "create" }, existingUser, true);
+    await this.firebase.putDocument(`onboardingDrafts/${user.uid}`, { ...draft, status: "complete", completedAt: new Date().toISOString() });
+    return result;
+  }
+
+  async invite(user: FirebaseIdentity, dto: InvitationDto): Promise<RecordValue> { const { organizationId } = await this.active(user, "users.manage"); if (!ROLES.includes(dto.role as never)) throw new BadRequestException({ code: "invalid_role", message: "The requested role is not supported." }); return this.job(user, organizationId, "invitation", { email: dto.email.toLowerCase(), role: dto.role }); }
+  async socialHandoff(user: FirebaseIdentity, dto: SocialHandoffDto): Promise<RecordValue> { const { organizationId } = await this.active(user, "settings.manage"); const job = await this.job(user, organizationId, "social_handoff", { provider: dto.provider }); return { ...job, handoffUrl: `/api/v1/organizations/current/social-handoffs/${job.id}/start` }; }
+
+  private async createOrganization(user: FirebaseIdentity, dto: CreateOrganizationDto, existingUser?: RecordValue, setupComplete = false): Promise<CreatedOrganizationResult> {
+    const now = new Date().toISOString(); const organizationId = randomUUID(); const membershipId = `${organizationId}_${user.uid}`; const permissions = [...PERMISSIONS]; const revision = randomUUID();
+    const organization = { id: organizationId, ...this.profileFields(dto), name: dto.name.trim(), setupComplete, onboardingStatus: setupComplete ? "complete" : "incomplete", subscriptionStatus: "TRIAL", timezone: dto.timezone?.trim() || "UTC", revision, createdBy: user.uid, createdAt: now, updatedAt: now, ...(dto.firstCampaignChoice === "defer" ? { firstCampaignDeferredAt: now, firstCampaignDeferredBy: user.uid } : {}) };
+    const membership = { id: membershipId, organizationId, userId: user.uid, role: "ChurchAdministrator", status: "ACTIVE", permissions, createdAt: now, updatedAt: now };
+    await this.firebase.putDocument(`organizations/${organizationId}`, organization); await this.firebase.putDocument(`memberships/${membershipId}`, membership); await this.firebase.putDocument(`users/${user.uid}`, { ...(existingUser ?? {}), uid: user.uid, email: existingUser?.email ?? user.email ?? "", displayName: existingUser?.displayName ?? user.name ?? "User", status: existingUser?.status ?? "ACTIVE", activeOrganizationId: organizationId, updatedAt: now });
+    if (dto.firstCampaignChoice === "create") await this.job(user, organizationId, "campaign_draft", { source: "onboarding" });
+    await this.audit(user, organizationId, "organization.create", "success", { setupMode: "create" });
+    return { organization: this.profile(organization) as RecordValue & { id: string; name?: string }, membership: this.safeMembership(membership), role: membership.role, permissions, subscriptionStatus: "TRIAL", onboardingStatus: setupComplete ? "complete" : "incomplete", ...(dto.firstCampaignChoice === "create" ? { nextActionUrl: "/app/campaigns/new?source=onboarding" } : {}), recoveryMessages: [] };
+  }
+
+  private join(user: FirebaseIdentity, dto: CreateOrganizationDto): Promise<CreatedOrganizationResult> { void user; if (!dto.invitationCode?.trim()) throw new BadRequestException({ code: "invitation_code_required", message: "Invitation code is required to join an organization." }); return Promise.reject(new NotFoundException({ code: "invitation_not_found", message: "The invitation code is invalid or expired." })); }
+  private async active(user: FirebaseIdentity, permission: string) { const userDoc = await this.firebase.getDocument(`users/${user.uid}`); const organizationId = this.stringValue(userDoc?.activeOrganizationId); const membership = organizationId ? await this.firebase.getDocument(`memberships/${organizationId}_${user.uid}`) : undefined; if (!organizationId || membership?.status !== "ACTIVE" || !this.stringArray(membership.permissions).includes(permission)) throw new ForbiddenException({ code: "organization_permission_missing", message: "An active organization membership with permission is required." }); const organization = await this.firebase.getDocument(`organizations/${organizationId}`); if (!organization) throw new NotFoundException({ code: "organization_not_found", message: "The active organization no longer exists." }); return { organizationId, organization, membership }; }
+  private profileFields(dto: Partial<CreateOrganizationDto>) { const keys = ["slogan","description","seniorPastor","primaryColor","secondaryColor","headingFont","bodyFont","primaryLogo","secondaryLogo","contact","socialChannels","serviceDays","serviceTimes","bibleTranslation","ministryTone","statementOfFaith","doctrinalGuidelines","prohibitedContent","defaultHashtags","defaultFooter","teamInvitations","socialConnectionNotes","firstCampaignChoice"] as const; return Object.fromEntries(keys.filter((key) => dto[key] !== undefined).map((key) => [key, typeof dto[key] === "string" ? this.stringValue(dto[key]) : dto[key]])); }
+  private profile(org: RecordValue) { const { createdBy, ...safe } = org; void createdBy; return safe; }
+  private safeMembership(m: RecordValue) { return { id: m.id, organizationId: m.organizationId, userId: m.userId, role: m.role, status: m.status, permissions: m.permissions }; }
+  private async job(user: FirebaseIdentity, organizationId: string, type: string, payload: RecordValue) { const now = new Date().toISOString(); const id = randomUUID(); const job = { id, organizationId, type, status: "queued", progress: 0, retryable: true, payload, createdBy: user.uid, createdAt: now, updatedAt: now }; await this.firebase.putDocument(`asyncJobs/${id}`, job); await this.audit(user, organizationId, `${type}.queue`, "success", { type }); return { id, type, status: "queued", progress: 0, retryable: true, createdAt: now }; }
+  private async audit(user: FirebaseIdentity, organizationId: string, action: string, outcome: string, summary: RecordValue) { const id = randomUUID(); await this.firebase.putDocument(`auditEvents/${id}`, { id, correlationId: requestContext.getStore()?.correlationId ?? "", actor: user.uid, organizationId, resource: action, outcome, summary, createdAt: new Date().toISOString() }); }
+  private stringArray(value: unknown) { return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []; }
+  private stringValue(value: unknown) { return typeof value === "string" ? value.trim() : ""; }
 }
