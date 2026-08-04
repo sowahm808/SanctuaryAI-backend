@@ -22,7 +22,7 @@ interface FirebaseRefreshResponse {
   user_id: string;
 }
 interface FirebaseError {
-  error?: { message?: string };
+  error?: { code?: number; message?: string; status?: string };
 }
 interface FirebaseAuthResponse {
   idToken: string;
@@ -71,6 +71,8 @@ export class FirebaseService {
       throw new ServiceUnavailableException({
         code: "FIREBASE_ERROR",
         message,
+        firebaseStatus: body.error?.status,
+        firebaseStatusCode: body.error?.code ?? response.status,
       });
     }
     return body;
@@ -323,7 +325,7 @@ export class FirebaseService {
     } catch (error: unknown) {
       if (
         error instanceof ServiceUnavailableException &&
-        JSON.stringify(error.getResponse()).includes("NOT_FOUND")
+        this.isFirebaseNotFound(error)
       ) {
         await this.createUserProfile(identity, identity.name?.trim() || "User");
         return;
@@ -338,10 +340,24 @@ export class FirebaseService {
     }).catch((error: unknown) => {
       if (
         error instanceof ServiceUnavailableException &&
-        JSON.stringify(error.getResponse()).includes("NOT_FOUND")
+        this.isFirebaseNotFound(error)
       )
         return;
       throw error;
     });
+  }
+
+  private isFirebaseNotFound(error: ServiceUnavailableException): boolean {
+    const response = error.getResponse();
+    if (typeof response === "string") return false;
+
+    const details = response as {
+      firebaseStatus?: unknown;
+      firebaseStatusCode?: unknown;
+    };
+    return (
+      details.firebaseStatus === "NOT_FOUND" ||
+      details.firebaseStatusCode === 404
+    );
   }
 }
