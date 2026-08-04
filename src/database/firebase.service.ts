@@ -48,6 +48,10 @@ type FirestoreValue =
   | { stringValue: string }
   | { booleanValue: boolean }
   | { timestampValue: string }
+  | { integerValue: string }
+  | { doubleValue: number }
+  | { nullValue: null }
+  | { mapValue: { fields?: Record<string, FirestoreValue> } }
   | { arrayValue: { values?: FirestoreValue[] } };
 
 const encode = (value: string | Buffer): string =>
@@ -413,11 +417,20 @@ export class FirebaseService {
   }
 
   private encodeValue(value: unknown): FirestoreValue {
+    if (value === null || value === undefined) return { nullValue: null };
     if (typeof value === "boolean") return { booleanValue: value };
+    if (typeof value === "number") {
+      return Number.isInteger(value) ? { integerValue: String(value) } : { doubleValue: value };
+    }
     if (Array.isArray(value)) {
       return { arrayValue: { values: value.map((item) => this.encodeValue(item)) } };
     }
-    return { stringValue: String(value) };
+    if (typeof value === "object") {
+      return { mapValue: { fields: this.encodeFields(value as Record<string, unknown>) } };
+    }
+    if (typeof value === "string") return { stringValue: value };
+    if (typeof value === "bigint" || typeof value === "symbol") return { stringValue: value.toString() };
+    return { stringValue: "" };
   }
 
   private decodeFields(fields: Record<string, FirestoreValue>): Record<string, unknown> {
@@ -430,6 +443,10 @@ export class FirebaseService {
     if ("stringValue" in value) return value.stringValue;
     if ("booleanValue" in value) return value.booleanValue;
     if ("timestampValue" in value) return value.timestampValue;
+    if ("integerValue" in value) return Number(value.integerValue);
+    if ("doubleValue" in value) return value.doubleValue;
+    if ("nullValue" in value) return null;
+    if ("mapValue" in value) return this.decodeFields(value.mapValue.fields ?? {});
     return (value.arrayValue.values ?? []).map((item) => this.decodeValue(item));
   }
 

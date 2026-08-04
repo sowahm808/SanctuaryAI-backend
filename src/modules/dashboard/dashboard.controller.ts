@@ -1,49 +1,31 @@
-import { Controller, Get, UseGuards } from "@nestjs/common";
+import { Controller, Get, Header, Headers, HttpCode, Res, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
-import {
-  CurrentUser,
-  FirebaseAuthGuard,
-} from "../../security/firebase-auth.guard";
+import type { Response } from "express";
+import { RawResponse } from "../../common/envelope.interceptor";
+import { requestContext } from "../../common/request-context";
 import { FirebaseIdentity } from "../../database/firebase.service";
-
-interface DashboardSummary {
-  user: {
-    uid: string;
-    email?: string;
-    displayName?: string;
-    emailVerified: boolean;
-  };
-  metrics: {
-    activeCampaigns: number;
-    pendingApprovals: number;
-    scheduledSocialPosts: number;
-    aiGenerationsThisMonth: number;
-  };
-  recentActivity: unknown[];
-}
+import { CurrentUser, FirebaseAuthGuard } from "../../security/firebase-auth.guard";
+import { DashboardService } from "./dashboard.service";
 
 @ApiTags("Dashboard")
 @ApiBearerAuth()
 @UseGuards(FirebaseAuthGuard)
 @Controller("dashboard")
 export class DashboardController {
+  constructor(private readonly dashboard: DashboardService) {}
+
   @Get("summary")
-  @ApiOperation({ summary: "Return the authenticated user's dashboard summary" })
-  summary(@CurrentUser() user: FirebaseIdentity): DashboardSummary {
-    return {
-      user: {
-        uid: user.uid,
-        email: user.email,
-        displayName: user.name,
-        emailVerified: user.emailVerified,
-      },
-      metrics: {
-        activeCampaigns: 0,
-        pendingApprovals: 0,
-        scheduledSocialPosts: 0,
-        aiGenerationsThisMonth: 0,
-      },
-      recentActivity: [],
-    };
+  @RawResponse()
+  @HttpCode(200)
+  @Header("Cache-Control", "private, max-age=30")
+  @ApiOperation({ summary: "Return the active organization's dashboard summary" })
+  async summary(@CurrentUser() user: FirebaseIdentity, @Headers("if-none-match") ifNoneMatch: string | undefined, @Res() response: Response): Promise<void> {
+    const result = await this.dashboard.summary(user);
+    response.setHeader("ETag", result.etag);
+    if (ifNoneMatch === result.etag) {
+      response.status(304).send();
+      return;
+    }
+    response.status(200).json({ data: result.summary, correlationId: requestContext.getStore()?.correlationId });
   }
 }

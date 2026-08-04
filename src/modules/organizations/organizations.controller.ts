@@ -1,8 +1,8 @@
-import { Body, Controller, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Patch, Post, Put, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { FirebaseIdentity } from "../../database/firebase.service";
 import { CurrentUser, FirebaseAuthGuard } from "../../security/firebase-auth.guard";
-import { CreateOrganizationDto } from "./dto";
+import { CreateOrganizationDto, InvitationDto, OnboardingDraftDto, PatchOrganizationDto, SocialHandoffDto } from "./dto";
 import { CreatedOrganizationResult, OrganizationsService } from "./organizations.service";
 
 @ApiTags("Organizations")
@@ -13,11 +13,27 @@ export class OrganizationsController {
   constructor(private readonly organizations: OrganizationsService) {}
 
   @Post()
-  @ApiOperation({ summary: "Create an organization for the authenticated user" })
-  create(
-    @CurrentUser() user: FirebaseIdentity,
-    @Body() dto: CreateOrganizationDto,
-  ): Promise<CreatedOrganizationResult> {
-    return this.organizations.create(user, dto);
-  }
+  @ApiOperation({ summary: "Create or join an organization for the authenticated user" })
+  create(@CurrentUser() user: FirebaseIdentity, @Body() dto: CreateOrganizationDto): Promise<CreatedOrganizationResult> { return this.organizations.create(user, dto); }
+
+  @Get("current")
+  current(@CurrentUser() user: FirebaseIdentity): Promise<Record<string, unknown>> { return this.organizations.current(user); }
+
+  @Patch("current")
+  patchCurrent(@CurrentUser() user: FirebaseIdentity, @Body() dto: PatchOrganizationDto): Promise<Record<string, unknown>> { return this.organizations.patchCurrent(user, dto); }
+
+  @Post("current/invitations")
+  invite(@CurrentUser() user: FirebaseIdentity, @Body() dto: InvitationDto): Promise<Record<string, unknown>> { return this.organizations.invite(user, dto); }
+
+  @Post("current/social-handoffs")
+  socialHandoff(@CurrentUser() user: FirebaseIdentity, @Body() dto: SocialHandoffDto): Promise<Record<string, unknown>> { return this.organizations.socialHandoff(user, dto); }
+
+  @Get("onboarding-draft")
+  getDraft(@CurrentUser() user: FirebaseIdentity): Promise<Record<string, unknown>> { return this.organizations.getDraft(user); }
+
+  @Put("onboarding-draft")
+  putDraft(@CurrentUser() user: FirebaseIdentity, @Body() dto: OnboardingDraftDto): Promise<Record<string, unknown>> { return this.organizations.putDraft(user, dto); }
+
+  @Post("onboarding/complete")
+  complete(@CurrentUser() user: FirebaseIdentity): Promise<CreatedOrganizationResult> { return this.organizations.completeOnboarding(user); }
 }
