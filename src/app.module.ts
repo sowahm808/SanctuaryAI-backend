@@ -4,6 +4,7 @@ import { LoggerModule } from "nestjs-pino";
 import { environmentSchema } from "./config/environment";
 import { DatabaseModule } from "./database/database.module";
 import { CorrelationMiddleware } from "./common/correlation.middleware";
+import { CsrfOriginMiddleware } from "./common/csrf-origin.middleware";
 import { AuthModule } from "./modules/auth/auth.module";
 import { DashboardModule } from "./modules/dashboard/dashboard.module";
 import { HealthController } from "./modules/health/health.controller";
@@ -45,6 +46,6 @@ import { SecurityModule } from "./security/security.module";
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
-    consumer.apply(CorrelationMiddleware).forRoutes("*");
+    consumer.apply(CorrelationMiddleware, CsrfOriginMiddleware).forRoutes("*");
   }
 }
