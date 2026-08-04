@@ -1,4 +1,4 @@
-import Joi = require("joi");
+import Joi from "joi";
 
 export const environmentSchema = Joi.object({
   NODE_ENV: Joi.string()
