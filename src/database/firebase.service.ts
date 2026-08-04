@@ -206,6 +206,14 @@ export class FirebaseService {
       idToken,
     });
   }
+
+  resetPassword(oobCode: string, newPassword: string): Promise<unknown> {
+    return this.identity("accounts:resetPassword", { oobCode, newPassword });
+  }
+
+  verifyEmail(oobCode: string): Promise<unknown> {
+    return this.identity("accounts:update", { oobCode });
+  }
   private setAccountInfo(
     idToken: string,
     fields: Record<string, unknown>,
@@ -234,7 +242,7 @@ export class FirebaseService {
     );
   }
 
-  async verifyIdToken(token: string): Promise<FirebaseIdentity> {
+  async verifyIdToken(token: string, checkRevoked = false): Promise<FirebaseIdentity> {
     const parts = token.split(".");
     if (parts.length !== 3)
       throw new UnauthorizedException("Invalid Firebase ID token");
@@ -275,6 +283,9 @@ export class FirebaseService {
       Number(claims.exp) > now &&
       Number(claims.iat) <= now;
     if (!valid) throw new UnauthorizedException("Invalid Firebase ID token");
+    if (checkRevoked && !emulator) {
+      await this.assertTokenNotRevoked(token, claims);
+    }
     return {
       uid: claims.sub as string,
       email: typeof claims.email === "string" ? claims.email : undefined,
@@ -282,6 +293,21 @@ export class FirebaseService {
       name: typeof claims.name === "string" ? claims.name : undefined,
       claims,
     };
+  }
+
+  private async assertTokenNotRevoked(
+    idToken: string,
+    claims: Record<string, unknown>,
+  ): Promise<void> {
+    const authTime = Number(claims.auth_time);
+    if (!Number.isFinite(authTime))
+      throw new UnauthorizedException("Invalid Firebase ID token");
+    const result = await this.identity<{
+      users?: Array<{ validSince?: string }>;
+    }>("accounts:lookup", { idToken });
+    const validSince = Number(result.users?.[0]?.validSince ?? 0);
+    if (validSince && authTime < validSince)
+      throw new UnauthorizedException("Invalid Firebase ID token");
   }
 
   private async googleCertificates(): Promise<

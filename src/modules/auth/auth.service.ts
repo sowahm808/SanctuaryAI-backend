@@ -1,7 +1,7 @@
-import { ForbiddenException, Injectable, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, UnauthorizedException } from "@nestjs/common";
 import { createHash, randomBytes } from "node:crypto";
 import { FirebaseService } from "../../database/firebase.service";
-import { LoginDto, RegisterDto } from "./dto";
+import { InvitationAcceptDto, LoginDto, RegisterDto } from "./dto";
 import {
   AuthResult,
   AuthSession,
@@ -50,7 +50,7 @@ export class AuthService {
     result: AuthResult;
     sessionToken?: string;
   }> {
-    const identity = await this.firebase.verifyIdToken(idToken);
+    const identity = await this.firebase.verifyIdToken(idToken, true);
     await this.firebase.ensureUserProfile(identity);
     if (!identity.emailVerified) {
       return { result: { status: "verification_required" } };
@@ -98,6 +98,32 @@ export class AuthService {
     const response = await this.firebase.refresh(refreshToken);
     const identity = await this.firebase.verifyIdToken(response.idToken);
     return this.authResponse(response, identity);
+  }
+
+
+  verifyMfa(challengeId: string, code: string): never {
+    void challengeId;
+    void code;
+    throw new BadRequestException({
+      code: "auth_mfa_not_configured",
+      message: "MFA verification is not available for this login attempt.",
+    });
+  }
+
+  acceptInvitation(dto: InvitationAcceptDto): never {
+    void dto;
+    throw new ConflictException({
+      code: "auth_invitation_unavailable",
+      message: "The request could not be completed.",
+    });
+  }
+
+  async resetPassword(token: string, password: string): Promise<void> {
+    await this.firebase.resetPassword(token, password);
+  }
+
+  async verifyEmail(token: string): Promise<void> {
+    await this.firebase.verifyEmail(token);
   }
 
   async forgotPassword(email: string) {

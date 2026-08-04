@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -22,8 +23,12 @@ import { AuthService } from "./auth.service";
 import { RawResponse } from "../../common/envelope.interceptor";
 import {
   EmailDto,
+  EmailVerifyDto,
   FirebaseLoginDto,
+  InvitationAcceptDto,
   LoginDto,
+  MfaVerifyDto,
+  PasswordResetDto,
   RefreshDto,
   RegisterDto,
 } from "./dto";
@@ -56,8 +61,10 @@ export class AuthController {
   @ApiOperation({ summary: "Authenticate with a Firebase ID token" })
   async firebase(
     @Body() dto: FirebaseLoginDto,
+    @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ) {
+    this.validateStateChangingOrigin(request);
     const exchange = await this.auth.loginWithFirebase(dto.idToken);
     this.preventCaching(response);
     if (exchange.sessionToken) this.setSessionCookie(response, exchange.sessionToken);
@@ -69,8 +76,10 @@ export class AuthController {
   @ApiOperation({ summary: "Exchange a Firebase ID token for an app session" })
   async exchangeFirebaseToken(
     @Body() dto: FirebaseLoginDto,
+    @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ) {
+    this.validateStateChangingOrigin(request);
     const exchange = await this.auth.exchangeFirebaseToken(dto.idToken);
     this.preventCaching(response);
     if (exchange.sessionToken) this.setSessionCookie(response, exchange.sessionToken);
@@ -120,6 +129,59 @@ export class AuthController {
     return this.auth.restoreSession(this.readSessionCookie(request));
   }
 
+
+  @Post("mfa/verify")
+  @HttpCode(200)
+  @RawResponse()
+  verifyMfa(
+    @Body() dto: MfaVerifyDto,
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    this.validateStateChangingOrigin(request);
+    this.preventCaching(response);
+    return this.auth.verifyMfa(dto.challengeId, dto.code);
+  }
+
+  @Post("invitations/accept")
+  @HttpCode(200)
+  @RawResponse()
+  acceptInvitation(
+    @Body() dto: InvitationAcceptDto,
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    this.validateStateChangingOrigin(request);
+    this.preventCaching(response);
+    return this.auth.acceptInvitation(dto);
+  }
+
+  @Post("password/reset")
+  @HttpCode(204)
+  @RawResponse()
+  async resetPassword(
+    @Body() dto: PasswordResetDto,
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<void> {
+    this.validateStateChangingOrigin(request);
+    this.preventCaching(response);
+    await this.auth.resetPassword(dto.token, dto.password);
+  }
+
+  @Post("email/verify")
+  @HttpCode(204)
+  @RawResponse()
+  async verifyEmail(
+    @Body() dto: EmailVerifyDto,
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<void> {
+    this.validateStateChangingOrigin(request);
+    this.preventCaching(response);
+    await this.auth.verifyEmail(dto.token);
+  }
+
   @Post("logout")
   @HttpCode(204)
   @RawResponse()
@@ -127,9 +189,35 @@ export class AuthController {
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ): Promise<void> {
+    this.validateStateChangingOrigin(request);
     await this.auth.logout(this.readSessionCookie(request));
     this.preventCaching(response);
     response.clearCookie(FIREBASE_SESSION_COOKIE, this.cookieOptions());
+  }
+
+  private validateStateChangingOrigin(request: Request): void {
+    const origin = request.header("origin");
+    const referer = request.header("referer");
+    if (!origin && !referer) return;
+    const allowed = this.config
+      .getOrThrow<string>("CORS_ORIGINS")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+    let candidate = origin ?? "";
+    if (!candidate && referer) {
+      try {
+        candidate = new URL(referer).origin;
+      } catch {
+        candidate = "";
+      }
+    }
+    if (!allowed.includes(candidate)) {
+      throw new BadRequestException({
+        code: "csrf_origin_invalid",
+        message: "The request could not be completed.",
+      });
+    }
   }
 
   private setSessionCookie(response: Response, token: string): void {
