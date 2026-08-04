@@ -1,0 +1,7 @@
+import { IsArray, IsIn, IsObject, IsOptional, IsString } from "class-validator";
+export class ThemeInputDto { @IsOptional() @IsString() date?: string; @IsOptional() @IsString() campaignId?: string; @IsOptional() @IsString() topic?: string; @IsOptional() @IsArray() scriptures?: unknown[]; @IsOptional() @IsString() spiritualEmphasis?: string; @IsOptional() @IsString() pastorNotes?: string; @IsOptional() @IsString() previousTheme?: string; @IsOptional() @IsArray() events?: unknown[]; @IsOptional() @IsString() tone?: string; @IsOptional() @IsString() audience?: string; @IsOptional() @IsString() bibleTranslation?: string; @IsOptional() @IsString() templateId?: string; }
+export class ThemePatchInputDto extends ThemeInputDto { @IsString() revision!: string; @IsOptional() @IsString() idempotencyKey?: string; }
+export class ThemeOutputDto { @IsString() revision!: string; @IsOptional() @IsObject() output?: Record<string, unknown>; @IsOptional() @IsString() changeSummary?: string; }
+export class ThemeRefineDto { @IsIn(["prophetic","pastoral","simplify","add-scriptures","shorten","expand","alternative-generation"]) scope!: string; @IsOptional() @IsString() sourceRevision?: string; @IsOptional() @IsString() idempotencyKey?: string; @IsOptional() @IsArray() targetFields?: string[]; }
+export class ThemeCommentDto { @IsString() body!: string; @IsOptional() @IsArray() mentions?: string[]; @IsOptional() resolved?: boolean; }
+export class ThemeActionDto { @IsOptional() @IsString() revision?: string; @IsOptional() @IsString() feedback?: string; }
