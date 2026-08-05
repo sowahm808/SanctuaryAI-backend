@@ -49,4 +49,5 @@ export class SectionActionDto {
 export class GenerateDto {
   @IsOptional() @IsString() idempotencyKey?: string;
   @IsOptional() @IsString() sourceRevision?: string;
+  @IsOptional() @IsString() revision?: string;
 }
