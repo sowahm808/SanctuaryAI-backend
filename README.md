@@ -56,4 +56,4 @@ For local development set `FIRESTORE_EMULATOR_HOST` and `FIREBASE_AUTH_EMULATOR_
 
 ## Checks
 
-Run `npm run build`, `npm run lint`, and `npm test`. See [architecture](docs/ARCHITECTURE.md) and the audited [implementation checklist](todo.md).
+Run `npm run build`, `npm run lint`, and `npm test`. See [architecture](docs/ARCHITECTURE.md), the [backend API route guide](docs/BACKEND_API_ROUTE_GUIDE.md), and the audited [implementation checklist](todo.md).
