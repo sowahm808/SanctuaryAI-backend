@@ -12,6 +12,7 @@ import { OrganizationsModule } from "./modules/organizations/organizations.modul
 import { JobsModule } from "./modules/jobs/jobs.module";
 import { CampaignsModule } from "./modules/campaigns/campaigns.module";
 import { ThemesModule } from "./modules/themes/themes.module";
+import { WorkflowsModule } from "./modules/workflows/workflows.module";
 import { SecurityModule } from "./security/security.module";
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { SecurityModule } from "./security/security.module";
     JobsModule,
     CampaignsModule,
     ThemesModule,
+    WorkflowsModule,
   ],
   controllers: [HealthController],
 })
