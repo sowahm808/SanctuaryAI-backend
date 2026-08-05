@@ -106,4 +106,39 @@ describe("CampaignsService", () => {
       expect.objectContaining({ status: CampaignStatus.Draft }),
     );
   });
+
+  it("accepts legacy revision field when generating a campaign", async () => {
+    const firebase = {
+      getDocument: jest.fn((path: string) =>
+        Promise.resolve(
+          path === "campaigns/campaign-1"
+            ? { id: "campaign-1", organizationId: "org-1", revision: "campaign-revision" }
+            : path === "users/user-1"
+              ? { activeOrganizationId: "org-1" }
+              : path === "memberships/org-1_user-1"
+                ? { status: "ACTIVE", permissions: ["campaigns.generate"] }
+                : undefined,
+        ),
+      ),
+      putDocument: jest.fn().mockResolvedValue(undefined),
+    } as unknown as FirebaseService;
+
+    const result = await new CampaignsService(firebase).generate(identity, "campaign-1", {
+      revision: "client-revision",
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        organizationId: "org-1",
+        type: "campaign_generate",
+        sourceRevision: "client-revision",
+        payload: { campaignId: "campaign-1", scope: undefined, sourceRevision: "client-revision" },
+      }),
+    );
+    expect(firebase.putDocument).toHaveBeenCalledWith(
+      expect.stringMatching(/^asyncJobs\//),
+      expect.objectContaining({ sourceRevision: "client-revision" }),
+    );
+  });
+
 });
