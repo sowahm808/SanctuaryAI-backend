@@ -8,13 +8,17 @@ import { CampaignsService } from "../src/modules/campaigns/campaigns.service";
 const identity = { uid: "user-1", emailVerified: true, claims: {} };
 
 function firebaseMock(): FirebaseService {
+  return firebaseMockWithPermissions(["campaigns.create"]);
+}
+
+function firebaseMockWithPermissions(permissions: string[]): FirebaseService {
   return {
     getDocument: jest.fn((path: string) =>
       Promise.resolve(
         path === "users/user-1"
           ? { activeOrganizationId: "org-1" }
           : path === "memberships/org-1_user-1"
-            ? { status: "ACTIVE", permissions: ["campaigns.create"] }
+            ? { status: "ACTIVE", permissions }
             : undefined,
       ),
     ),
@@ -46,6 +50,20 @@ describe("CampaignsService", () => {
         status: CampaignStatus.Draft,
       }),
     );
+    expect(firebase.putDocument).toHaveBeenCalledWith(
+      expect.stringMatching(/^campaigns\//),
+      expect.objectContaining({ status: CampaignStatus.Draft }),
+    );
+  });
+
+  it("accepts legacy campaigns.write membership permission for campaign creation", async () => {
+    const firebase = firebaseMockWithPermissions(["campaigns.write"]);
+    const result = await new CampaignsService(firebase).create(identity, {
+      month: "2026-08",
+      focus: "Divine Advancement",
+    });
+
+    expect(result).toEqual(expect.objectContaining({ organizationId: "org-1" }));
     expect(firebase.putDocument).toHaveBeenCalledWith(
       expect.stringMatching(/^campaigns\//),
       expect.objectContaining({ status: CampaignStatus.Draft }),
