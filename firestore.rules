@@ -7,26 +7,21 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/memberships/$(organizationId + '_' + request.auth.uid))
         && get(/databases/$(database)/documents/memberships/$(organizationId + '_' + request.auth.uid)).data.status == 'ACTIVE';
     }
-    match /users/{uid} {
-      allow read: if signedIn() && request.auth.uid == uid;
-      allow write: if false;
+    function tenantRead() {
+      return resource.data.organizationId is string && activeMember(resource.data.organizationId) && !('deletedAt' in resource.data);
     }
-    match /organizations/{organizationId} {
-      allow read: if activeMember(organizationId);
-      allow write: if false;
-    }
-    match /memberships/{membershipId} {
-      allow read: if signedIn() && resource.data.userId == request.auth.uid;
-      allow write: if false;
-    }
-    // Application sessions are server-only. Documents are keyed by a digest of
-    // the opaque cookie value, but must still never be exposed to Firebase clients.
-    match /sessions/{sessionId} {
-      allow read, write: if false;
-    }
-    match /{collection}/{documentId} {
-      allow read: if resource.data.organizationId is string && activeMember(resource.data.organizationId);
-      allow create, update, delete: if false;
-    }
+
+    match /users/{uid} { allow read: if signedIn() && request.auth.uid == uid; allow write: if false; }
+    match /organizations/{organizationId} { allow read: if activeMember(organizationId); allow write: if false; }
+    match /memberships/{membershipId} { allow read: if signedIn() && resource.data.userId == request.auth.uid; allow write: if false; }
+    match /sessions/{sessionId} { allow read, write: if false; }
+    match /verificationTokens/{tokenId} { allow read, write: if false; }
+    match /passwordResetTokens/{tokenId} { allow read, write: if false; }
+    match /webhookEvents/{eventId} { allow read, write: if false; }
+    match /systemSettings/{settingId} { allow read, write: if false; }
+
+    match /campaignUniqueness/{constraintId} { allow read, write: if false; }
+    match /{collection}/{documentId} { allow read: if tenantRead(); allow create, update, delete: if false; }
+    match /{collection}/{documentId}/{versionCollection}/{versionId} { allow read: if tenantRead(); allow create, update, delete: if false; }
   }
 }
