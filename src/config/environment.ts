@@ -31,6 +31,7 @@ export const environmentSchema = Joi.object({
   TOKEN_ENCRYPTION_KEY: Joi.string().required(),
   CORS_ORIGINS: Joi.string().required(),
 
-  OPENAI_API_KEY: Joi.string().allow("").optional(),
+  // OPENAI_API_KEY: Joi.string().allow("").optional(),
+  OPENAI_API_KEY: Joi.string().required(),
   SWAGGER_ENABLED: Joi.boolean().default(true),
 });
