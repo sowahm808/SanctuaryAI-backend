@@ -3,9 +3,10 @@ import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { FirebaseIdentity } from "../../database/firebase.service";
 import { CurrentUser, FirebaseAuthGuard } from "../../security/firebase-auth.guard";
 import { CampaignsService } from "./campaigns.service";
-import { CampaignDraftDto, CampaignWizardDto, DuplicateCampaignDto, GenerateDto, SectionActionDto, SectionMutationDto } from "./dto";
+import { CampaignDraftDto, CampaignWizardDto, CreateCampaignDto, DuplicateCampaignDto, GenerateDto, SectionActionDto, SectionMutationDto } from "./dto";
 @ApiTags("Campaigns") @ApiBearerAuth() @UseGuards(FirebaseAuthGuard) @Controller("campaigns")
 export class CampaignsController { constructor(private readonly campaigns: CampaignsService) {}
+ @Post() create(@CurrentUser() u:FirebaseIdentity,@Body() d:CreateCampaignDto){return this.campaigns.create(u,d)}
  @Post("drafts") createDraft(@CurrentUser() u:FirebaseIdentity,@Body() d:CampaignDraftDto){return this.campaigns.createDraft(u,d)}
  @Get(":id") get(@CurrentUser() u:FirebaseIdentity,@Param("id") id:string){return this.campaigns.get(u,id)}
  @Patch(":id/wizard") wizard(@CurrentUser() u:FirebaseIdentity,@Param("id") id:string,@Body() d:CampaignWizardDto){return this.campaigns.wizard(u,id,d)}
