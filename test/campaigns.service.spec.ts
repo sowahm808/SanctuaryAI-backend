@@ -69,4 +69,41 @@ describe("CampaignsService", () => {
       expect.objectContaining({ status: CampaignStatus.Draft }),
     );
   });
+
+  it("allows organization administrator roles when permission arrays are stale", async () => {
+    const firebase = {
+      getDocument: jest.fn((path: string) =>
+        Promise.resolve(
+          path === "users/user-1"
+            ? { activeOrganizationId: "org-1" }
+            : path === "memberships/org-1_user-1"
+              ? { status: "ACTIVE", role: "ChurchAdministrator", permissions: [] }
+              : undefined,
+        ),
+      ),
+      putDocument: jest.fn().mockResolvedValue(undefined),
+    } as unknown as FirebaseService;
+
+    const result = await new CampaignsService(firebase).create(identity, {
+      month: "2026-08",
+      focus: "Divine Enlargement",
+      scripture: "3 John 2",
+      tone: "Prophetic",
+      prayerQuantity: 20,
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        organizationId: "org-1",
+        spiritualFocus: "Divine Enlargement",
+        scriptures: ["3 John 2"],
+        tone: "Prophetic",
+        prayerQuantity: 20,
+      }),
+    );
+    expect(firebase.putDocument).toHaveBeenCalledWith(
+      expect.stringMatching(/^campaigns\//),
+      expect.objectContaining({ status: CampaignStatus.Draft }),
+    );
+  });
 });
