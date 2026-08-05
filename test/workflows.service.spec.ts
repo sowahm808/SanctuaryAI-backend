@@ -49,6 +49,29 @@ describe("WorkflowsService", () => {
     expect(firebase.putDocument).toHaveBeenCalledWith(expect.stringMatching(/^prayers\//), expect.any(Object));
   });
 
+  it("queues prayer generation jobs with the current revision", async () => {
+    const firebase = firebaseMock({ status: "ACTIVE", permissions: ["prayers.write"] });
+    (firebase.getDocument as jest.Mock).mockImplementation((path: string) =>
+      Promise.resolve(
+        path === "users/user-1"
+          ? { activeOrganizationId: "org-1" }
+          : path === "memberships/org-1_user-1"
+            ? { status: "ACTIVE", permissions: ["prayers.write"] }
+            : path === "prayers/prayer-1"
+              ? { id: "prayer-1", organizationId: "org-1", revision: "rev-1" }
+              : undefined,
+      ),
+    );
+
+    const result = await new WorkflowsService(firebase).generate(identity, "prayers", "prayer-1", {});
+
+    expect(result).toEqual(expect.objectContaining({ organizationId: "org-1", type: "prayers_generate", status: "queued", sourceRevision: "rev-1" }));
+    expect(firebase.putDocument).toHaveBeenCalledWith(expect.stringMatching(/^asyncJobs\//), expect.any(Object));
+    const putDocument = firebase.putDocument as jest.Mock<Promise<void>, [string, Record<string, unknown>]>;
+    const jobWrite = putDocument.mock.calls.find(([path]) => path.startsWith("asyncJobs/"));
+    expect(jobWrite?.[1]).toEqual(expect.objectContaining({ payload: { id: "prayer-1", sourceRevision: "rev-1" } }));
+  });
+
   it("still rejects active members without matching workflow permissions", async () => {
     const firebase = firebaseMock({ status: "ACTIVE", permissions: ["themes.write"] });
 

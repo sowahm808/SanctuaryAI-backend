@@ -72,6 +72,8 @@ export class WorkflowsController {
   comment(@CurrentUser() user: FirebaseIdentity, @Param("area", workflowAreaPipe) area: WorkflowArea, @Param("id") id: string, @Body() body: R) { return this.workflows.comment(user, area, id, body); }
   @Post(":area/:id/exports")
   export(@CurrentUser() user: FirebaseIdentity, @Param("area", workflowExportAreaPipe) area: WorkflowExportArea, @Param("id") id: string, @Body() body: R) { return this.workflows.exportJob(user, area, id, body); }
+  @Post(":area/:id/generate")
+  generate(@CurrentUser() user: FirebaseIdentity, @Param("area", workflowAreaPipe) area: WorkflowArea, @Param("id") id: string, @Body() body: R) { return this.workflows.generate(user, area, id, body); }
   @Post(":area/:id/:action")
   action(@CurrentUser() user: FirebaseIdentity, @Param("area", workflowAreaPipe) area: WorkflowArea, @Param("id") id: string, @Param("action", workflowActionPipe) action: WorkflowAction, @Body() body: R) { return this.workflows.action(user, area, id, action, body); }
 }
