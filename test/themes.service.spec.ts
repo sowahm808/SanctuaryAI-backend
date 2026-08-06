@@ -100,6 +100,6 @@ describe("ThemesService", () => {
     const queue = { publish: jest.fn().mockRejectedValue(queueError) } as unknown as ThemeGenerationQueue;
 
     await expect(new ThemesService(firebase, { generate: jest.fn() } as unknown as ThemeGenerationService, queue).generate(identity, "theme-1")).rejects.toBe(queueError);
-    expect(writes).toContainEqual(expect.objectContaining({ status: "failed", safeErrorCode: "generation_queue_unavailable" }));
+    expect(writes).toContainEqual(expect.objectContaining({ status: "enqueue_failed", safeErrorCode: "generation_queue_unavailable", correlationId: expect.any(String) }));
   });
 });
