@@ -1,4 +1,5 @@
 import { FirebaseService } from "../src/database/firebase.service";
+import { ServiceUnavailableException } from "@nestjs/common";
 import { ThemesService } from "../src/modules/themes/themes.service";
 import { ThemeGenerationService } from "../src/modules/themes/theme-generation.service";
 import { ThemeGenerationQueue } from "../src/modules/themes/theme-generation.queue";
@@ -22,7 +23,7 @@ describe("ThemesService", () => {
     } as unknown as FirebaseService;
 
     const generator = { generate: jest.fn() } as unknown as ThemeGenerationService;
-    const queue = { publish: jest.fn().mockResolvedValue(undefined) } as unknown as ThemeGenerationQueue;
+    const queue = { publish: jest.fn().mockResolvedValue("queue-job-1") } as unknown as ThemeGenerationQueue;
     const result = await new ThemesService(firebase, generator, queue).create(identity, {
       kind: "themes",
       brief: {
@@ -51,13 +52,13 @@ describe("ThemesService", () => {
       putDocument: jest.fn().mockResolvedValue(undefined),
     } as unknown as FirebaseService;
     const generator = { generate: jest.fn() } as unknown as ThemeGenerationService;
-    const queue = { publish: jest.fn().mockResolvedValue(undefined) } as unknown as ThemeGenerationQueue;
+    const queue = { publish: jest.fn().mockResolvedValue("queue-job-1") } as unknown as ThemeGenerationQueue;
 
     const result = await new ThemesService(firebase, generator, queue).generate(identity, "theme-1");
 
     expect(result).toEqual(expect.objectContaining({ status: "queued", progress: 0, sourceRevision: "rev-1", cancellationSupported: true }));
     expect(generator.generate).not.toHaveBeenCalled();
-    expect(firebase.putDocument).toHaveBeenCalledWith(expect.stringMatching(/^asyncJobs\//), expect.objectContaining({ status: "queued", progress: 0 }));
+    expect(firebase.putDocument).toHaveBeenCalledWith(expect.stringMatching(/^asyncJobs\//), expect.objectContaining({ status: "queued", progress: 0, queueJobId: "queue-job-1" }));
   });
 
   it("returns the same generation job for an idempotent retry", async () => {
@@ -76,7 +77,7 @@ describe("ThemesService", () => {
       putDocument,
     } as unknown as FirebaseService;
     const generator = { generate: jest.fn() } as unknown as ThemeGenerationService;
-    const queue = { publish: jest.fn().mockResolvedValue(undefined) } as unknown as ThemeGenerationQueue;
+    const queue = { publish: jest.fn().mockResolvedValue("queue-job-1") } as unknown as ThemeGenerationQueue;
     const service = new ThemesService(firebase, generator, queue);
 
     const first = await service.generate(identity, "theme-1", {}, "retry-key");
@@ -86,5 +87,19 @@ describe("ThemesService", () => {
     expect(putDocument.mock.calls.filter(([path]) => path.startsWith("asyncJobs/"))).toHaveLength(2);
     expect(queue.publish).toHaveBeenCalledTimes(1);
     expect(generator.generate).not.toHaveBeenCalled();
+  });
+
+  it("marks the durable job failed when BullMQ publication fails", async () => {
+    const theme = { id: "theme-1", organizationId: "org-1", revision: "rev-1", input: { topic: "Hope" }, currentOutput: {}, versions: [] };
+    const writes: Record<string, unknown>[] = [];
+    const firebase = {
+      getDocument: jest.fn((path: string) => Promise.resolve(path === "themes/theme-1" ? theme : path === "memberships/org-1_user-1" ? { status: "ACTIVE", permissions: ["themes.write"] } : undefined)),
+      putDocument: jest.fn((_path: string, value: Record<string, unknown>) => { writes.push(value); return Promise.resolve(); }),
+    } as unknown as FirebaseService;
+    const queueError = new ServiceUnavailableException({ code: "generation_queue_unavailable", message: "Theme generation cannot be queued right now. Please retry shortly." });
+    const queue = { publish: jest.fn().mockRejectedValue(queueError) } as unknown as ThemeGenerationQueue;
+
+    await expect(new ThemesService(firebase, { generate: jest.fn() } as unknown as ThemeGenerationService, queue).generate(identity, "theme-1")).rejects.toBe(queueError);
+    expect(writes).toContainEqual(expect.objectContaining({ status: "failed", safeErrorCode: "generation_queue_unavailable" }));
   });
 });

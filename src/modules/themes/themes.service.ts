@@ -30,16 +30,17 @@ type R=Record<string,unknown>; const FIELDS=["title","subtitle","scriptures","ex
   const suppliedKey=this.s(idempotencyKey); const resolvedKey=suppliedKey||createHash("sha256").update([organizationId,themeId,type,sourceRevision].join("\0")).digest("hex"); const jobId=this.stableJobId(organizationId,themeId,type,sourceRevision,resolvedKey);
   {const existing=await this.firebase.getDocument(`asyncJobs/${jobId}`); if(existing)return this.publicJob(existing);}
   const correlationId=requestContext.getStore()?.correlationId??randomUUID();
-  const job={id:jobId,organizationId,themeId,operation:type,type,status:"queued",progress:0,message:"Queued",retryable:true,cancellationSupported:true,payload,sourceRevision,targetFields:fields,idempotencyKey:resolvedKey,correlationId,attemptCount:0,maxAttempts:3,provider:"openai",providerModel:"",createdBy:user.uid,createdAt:now,queuedAt:now,updatedAt:now};
+  const job={id:jobId,organizationId,themeId,operation:type,type,status:"pending_enqueue",progress:0,message:"Preparing to queue",retryable:true,cancellationSupported:true,payload,sourceRevision,targetFields:fields,idempotencyKey:resolvedKey,correlationId,attemptCount:0,maxAttempts:3,provider:"openai",providerModel:"",createdBy:user.uid,createdAt:now,updatedAt:now};
   try {
    await this.firebase.putDocument(`asyncJobs/${jobId}`,job);
   } catch {
    throw new ServiceUnavailableException({code:"generation_queue_unavailable",message:"Theme generation cannot be queued right now. Please retry shortly."});
   }
-  try { await this.queue.publish({jobId,correlationId,organizationId,themeId,sourceRevision}); await this.firebase.putDocument(`asyncJobs/${jobId}`,{...job,enqueuedAt:new Date().toISOString()}); }
+  let queuedJob:R;
+  try { const queueJobId=await this.queue.publish({jobId,correlationId,organizationId,themeId,sourceRevision}); const queuedAt=new Date().toISOString(); queuedJob={...job,status:"queued",progress:0,message:"Queued",queueJobId,queuedAt,enqueuedAt:queuedAt,updatedAt:queuedAt}; await this.firebase.putDocument(`asyncJobs/${jobId}`,queuedJob); }
   catch(error){const failedAt=new Date().toISOString(); await this.firebase.putDocument(`asyncJobs/${jobId}`,{...job,status:"failed",retryable:true,safeErrorCode:"generation_queue_unavailable",safeErrorDetail:"Theme generation cannot be queued right now.",failedAt,updatedAt:failedAt}); throw error;}
   try {await this.audit(user,organizationId,`${type}.queued`,payload);} catch(error){this.logger.error({jobId,organizationId,type,error:error instanceof Error?error.message:"audit_write_failed"},"Theme generation audit write failed");}
-  return this.publicJob(job);
+  return this.publicJob(queuedJob);
  }
  private stableJobId(organizationId:string,themeId:string,type:string,revision:string,key:string){return createHash("sha256").update([organizationId,themeId,type,revision,key].join("\0")).digest("hex").slice(0,32);}
  private publicJob(job:R){return {id:this.s(job.id),status:this.s(job.status),progress:Math.max(0,Math.min(100,Number(job.progress)||0)),retryable:job.retryable===true,cancellationSupported:job.cancellationSupported===true,sourceRevision:this.s(job.sourceRevision),targetFields:this.arr(job.targetFields).filter((field):field is string=>typeof field==="string"),createdAt:this.s(job.createdAt),updatedAt:this.s(job.updatedAt)};}

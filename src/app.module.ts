@@ -1,5 +1,6 @@
 import { MiddlewareConsumer, Module, NestModule } from "@nestjs/common";
-import { ConfigModule } from "@nestjs/config";
+import { BullModule } from "@nestjs/bullmq";
+import { ConfigModule, ConfigService } from "@nestjs/config";
 import { LoggerModule } from "nestjs-pino";
 import { environmentSchema } from "./config/environment";
 import { DatabaseModule } from "./database/database.module";
@@ -15,11 +16,19 @@ import { ThemesModule } from "./modules/themes/themes.module";
 import { WorkflowsModule } from "./modules/workflows/workflows.module";
 import { PublicConfigModule } from "./modules/public-config/public-config.module";
 import { SecurityModule } from "./security/security.module";
+import { createRedisConnection } from "./config/redis";
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
       validationSchema: environmentSchema,
+    }),
+    BullModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        connection: createRedisConnection(config.getOrThrow<string>("REDIS_URL")),
+      }),
     }),
     LoggerModule.forRoot({
       pinoHttp: {

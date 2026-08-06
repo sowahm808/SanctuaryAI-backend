@@ -57,3 +57,20 @@ For local development set `FIRESTORE_EMULATOR_HOST` and `FIREBASE_AUTH_EMULATOR_
 ## Checks
 
 Run `npm run build`, `npm run lint`, and `npm test`. See [architecture](docs/ARCHITECTURE.md), the [backend API route guide](docs/BACKEND_API_ROUTE_GUIDE.md), and the audited [implementation checklist](todo.md).
+
+## Theme generation queue deployment
+
+Theme generation uses the BullMQ queue `theme-generation` and job name
+`generate-theme`. The BullMQ worker runs in the API process because
+`ThemeGenerationProcessor` is part of the application module graph; Render
+should start it with the Dockerfile command or `npm run start:api`.
+
+Production requires `REDIS_URL`, `OPENAI_API_KEY`, `OPENAI_MODEL`, and the same
+Firebase variables used by the API. Use the exact internal URL issued by the
+Render Key Value service. It may start with `redis://` or `rediss://`, and must
+not have surrounding quotes or trailing spaces. `redis://redis:6379` works only
+when a service named `redis` is resolvable on the deployment's private network;
+do not assume the Docker Compose hostname exists on Render. If API and worker
+processes are separated in the future, both must receive the same Redis,
+provider, and Firebase configuration. Validate connectivity without exposing
+credentials by running `npm run redis:ping`.
