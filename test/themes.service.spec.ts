@@ -1,6 +1,7 @@
 import { FirebaseService } from "../src/database/firebase.service";
 import { ThemesService } from "../src/modules/themes/themes.service";
 import { ThemeGenerationService } from "../src/modules/themes/theme-generation.service";
+import { ThemeGenerationQueue } from "../src/modules/themes/theme-generation.queue";
 
 /* Jest method mocks are asserted without invoking the unbound method. */
 /* eslint-disable @typescript-eslint/unbound-method */
@@ -21,7 +22,8 @@ describe("ThemesService", () => {
     } as unknown as FirebaseService;
 
     const generator = { generate: jest.fn() } as unknown as ThemeGenerationService;
-    const result = await new ThemesService(firebase, generator).create(identity, {
+    const queue = { publish: jest.fn().mockResolvedValue(undefined) } as unknown as ThemeGenerationQueue;
+    const result = await new ThemesService(firebase, generator, queue).create(identity, {
       kind: "themes",
       brief: {
         month_and_year: "September 2026",
@@ -49,8 +51,9 @@ describe("ThemesService", () => {
       putDocument: jest.fn().mockResolvedValue(undefined),
     } as unknown as FirebaseService;
     const generator = { generate: jest.fn() } as unknown as ThemeGenerationService;
+    const queue = { publish: jest.fn().mockResolvedValue(undefined) } as unknown as ThemeGenerationQueue;
 
-    const result = await new ThemesService(firebase, generator).generate(identity, "theme-1");
+    const result = await new ThemesService(firebase, generator, queue).generate(identity, "theme-1");
 
     expect(result).toEqual(expect.objectContaining({ status: "queued", progress: 0, sourceRevision: "rev-1", cancellationSupported: true }));
     expect(generator.generate).not.toHaveBeenCalled();
@@ -73,13 +76,15 @@ describe("ThemesService", () => {
       putDocument,
     } as unknown as FirebaseService;
     const generator = { generate: jest.fn() } as unknown as ThemeGenerationService;
-    const service = new ThemesService(firebase, generator);
+    const queue = { publish: jest.fn().mockResolvedValue(undefined) } as unknown as ThemeGenerationQueue;
+    const service = new ThemesService(firebase, generator, queue);
 
     const first = await service.generate(identity, "theme-1", {}, "retry-key");
     const second = await service.generate(identity, "theme-1", {}, "retry-key");
 
     expect(second).toEqual(first);
-    expect(putDocument.mock.calls.filter(([path]) => path.startsWith("asyncJobs/"))).toHaveLength(1);
+    expect(putDocument.mock.calls.filter(([path]) => path.startsWith("asyncJobs/"))).toHaveLength(2);
+    expect(queue.publish).toHaveBeenCalledTimes(1);
     expect(generator.generate).not.toHaveBeenCalled();
   });
 });
