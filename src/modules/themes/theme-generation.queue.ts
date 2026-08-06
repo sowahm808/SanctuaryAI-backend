@@ -1,96 +1,38 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit, ServiceUnavailableException } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
-import { connect as connectTcp, Socket } from "node:net";
-import { connect as connectTls, TLSSocket } from "node:tls";
-import { ThemeGenerationProcessor, ThemeQueuePayload } from "./theme-generation.processor";
-
-export const THEME_GENERATION_QUEUE = "sanctuaryai:theme-generation";
+import { Injectable, Logger, ServiceUnavailableException } from "@nestjs/common";
+import { InjectQueue } from "@nestjs/bullmq";
+import { Queue } from "bullmq";
+import { redisErrorCategory } from "../../config/redis";
+import { THEME_GENERATION_JOB, THEME_GENERATION_QUEUE } from "./theme-generation.constants";
+import type { ThemeQueuePayload } from "./theme-generation.processor";
 
 @Injectable()
-export class ThemeGenerationQueue implements OnModuleInit, OnModuleDestroy {
+export class ThemeGenerationQueue {
   private readonly logger = new Logger(ThemeGenerationQueue.name);
-  private stopped = false;
-  private workerStartedAt?: string;
+  constructor(@InjectQueue(THEME_GENERATION_QUEUE) private readonly queue: Queue<ThemeQueuePayload>) {}
 
-  constructor(private readonly config: ConfigService, private readonly processor: ThemeGenerationProcessor) {}
-
-  onModuleInit(): void {
-    if (this.config.get<string>("NODE_ENV") !== "test") {
-      this.workerStartedAt = new Date().toISOString();
-      void this.consume();
-    }
-  }
-
-  onModuleDestroy(): void { this.stopped = true; }
-
-  async publish(payload: ThemeQueuePayload): Promise<void> {
+  async publish(payload: ThemeQueuePayload): Promise<string> {
     try {
-      await this.command("RPUSH", THEME_GENERATION_QUEUE, JSON.stringify(payload));
+      const job = await this.queue.add(THEME_GENERATION_JOB, payload, {
+        jobId: payload.jobId,
+        attempts: 3,
+        backoff: { type: "exponential", delay: 5_000 },
+        removeOnComplete: 100,
+        removeOnFail: 100,
+      });
+      if (!job.id) throw new Error("queue_job_id_missing");
+      return job.id;
     } catch (error) {
-      this.logger.error({ event: "theme.generation.enqueue_failed", jobId: payload.jobId, correlationId: payload.correlationId, error: error instanceof Error ? error.message : "redis_command_failed" }, "Theme generation queue publish failed");
+      this.logger.error({ event: "theme.generation.enqueue_failed", correlationId: payload.correlationId, durableJobId: payload.jobId, queueName: THEME_GENERATION_QUEUE, errorName: error instanceof Error ? error.name : "Error", errorCode: redisErrorCategory(error) }, "Theme generation queue publish failed");
       throw new ServiceUnavailableException({ code: "generation_queue_unavailable", message: "Theme generation cannot be queued right now. Please retry shortly." });
     }
   }
 
-  async readiness(): Promise<{ queue: "up"; worker: "up"; workerStartedAt?: string }> {
-    await this.command("PING");
-    return { queue: "up", worker: "up", workerStartedAt: this.workerStartedAt };
-  }
-
-  private async consume(): Promise<void> {
-    while (!this.stopped) {
-      try {
-        const raw = await this.command("LPOP", THEME_GENERATION_QUEUE);
-        if (typeof raw === "string") await this.processor.process(JSON.parse(raw) as ThemeQueuePayload);
-        else await new Promise((resolve) => setTimeout(resolve, 750));
-      } catch {
-        this.logger.error({ event: "theme.generation.worker_unavailable" }, "Theme generation worker queue connection failed");
-        await new Promise((resolve) => setTimeout(resolve, 5_000));
-      }
-    }
-  }
-
-  private command(...parts: string[]): Promise<unknown> {
-    const redisUrl = new URL(this.config.getOrThrow<string>("REDIS_URL"));
-    return new Promise((resolve, reject) => {
-      const options = { host: redisUrl.hostname, port: Number(redisUrl.port || (redisUrl.protocol === "rediss:" ? 6380 : 6379)), servername: redisUrl.hostname };
-      const socket: Socket | TLSSocket = redisUrl.protocol === "rediss:" ? connectTls(options) : connectTcp(options);
-      const commands: string[] = [];
-      const username = decodeURIComponent(redisUrl.username);
-      const password = decodeURIComponent(redisUrl.password);
-      // Managed Redis providers commonly use Redis 6 ACL URLs of the form
-      // redis[s]://user:password@host. AUTH with only the password fails for
-      // non-default users, even though the URL itself is valid.
-      if (username) commands.push(this.resp("AUTH", username, password));
-      else if (password) commands.push(this.resp("AUTH", password));
-      if (redisUrl.pathname.length > 1) commands.push(this.resp("SELECT", redisUrl.pathname.slice(1)));
-      commands.push(this.resp(...parts));
-      let index = 0; let buffer = Buffer.alloc(0);
-      const timeout = setTimeout(() => socket.destroy(new Error("redis timeout")), 3_000);
-      socket.once("error", (error) => { clearTimeout(timeout); reject(error instanceof Error ? error : new Error("redis connection failed")); });
-      socket.on("data", (chunk: Buffer) => {
-        buffer = Buffer.concat([buffer, chunk]);
-        while (true) {
-          const frame = this.frame(buffer); if (!frame) return;
-          buffer = buffer.subarray(frame.bytes);
-          if (frame.error) { clearTimeout(timeout); socket.destroy(); reject(new Error("redis command failed")); return; }
-          index += 1;
-          if (index === commands.length) { clearTimeout(timeout); socket.end(); resolve(frame.value); return; }
-          socket.write(commands[index]);
-        }
-      });
-      socket.once(redisUrl.protocol === "rediss:" ? "secureConnect" : "connect", () => socket.write(commands[0]));
-    });
-  }
-
-  private resp(...parts: string[]): string { return `*${parts.length}\r\n${parts.map((part) => `$${Buffer.byteLength(part)}\r\n${part}\r\n`).join("")}`; }
-  private frame(data: Buffer): { bytes: number; value?: unknown; error?: boolean } | undefined {
-    const lineEnd = data.indexOf("\r\n"); if (lineEnd < 0) return undefined;
-    const header = data.subarray(0, lineEnd).toString("utf8");
-    if (header[0] === "+" || header[0] === ":" || header[0] === "-") return { bytes: lineEnd + 2, value: header.slice(1), error: header[0] === "-" };
-    if (header[0] !== "$") return { bytes: lineEnd + 2, error: true };
-    const length = Number(header.slice(1)); if (length === -1) return { bytes: lineEnd + 2, value: null };
-    const total = lineEnd + 2 + length + 2; if (data.length < total) return undefined;
-    return { bytes: total, value: data.subarray(lineEnd + 2, lineEnd + 2 + length).toString("utf8") };
+  async readiness(): Promise<{ queue: { status: "up" | "down" } }> {
+    try {
+      const client = await this.queue.client;
+      return { queue: { status: await client.ping() === "PONG" ? "up" : "down" } };
+    } catch { return { queue: { status: "down" } }; }
   }
 }
+
+export { THEME_GENERATION_JOB, THEME_GENERATION_QUEUE } from "./theme-generation.constants";

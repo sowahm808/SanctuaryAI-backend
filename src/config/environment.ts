@@ -27,7 +27,7 @@ export const environmentSchema = Joi.object({
   FIRESTORE_EMULATOR_HOST: Joi.string().optional(),
   FIREBASE_AUTH_EMULATOR_HOST: Joi.string().optional(),
 
-  REDIS_URL: Joi.string().uri({ scheme: ["redis", "rediss"] }).required(),
+  REDIS_URL: Joi.string().trim().min(1).uri({ scheme: ["redis", "rediss"] }).required(),
   TOKEN_ENCRYPTION_KEY: Joi.string().required(),
   CORS_ORIGINS: Joi.string().required(),
 
