@@ -19,9 +19,10 @@ export class JobsService {
     if (!job) throw new NotFoundException({ code: "job_not_found", message: "The job was not found." });
     const organizationId = this.stringValue(job.organizationId);
     await this.assertMember(user, organizationId);
-    if (!["queued", "running"].includes(this.stringValue(job.status))) return this.safeJob(job);
+    if (!["queued", "running", "cancelling"].includes(this.stringValue(job.status))) return this.safeJob(job);
     const now = new Date().toISOString();
-    const updated = { ...job, status: "cancelled", progress: Math.max(0, Math.min(100, Number(job.progress) || 0)), cancelledBy: user.uid, updatedAt: now };
+    const status = this.stringValue(job.status) === "running" ? "cancelling" : "cancelled";
+    const updated = { ...job, status, progress: Math.max(0, Math.min(100, Number(job.progress) || 0)), message: status === "cancelling" ? "Cancellation requested" : "Cancelled", cancelledBy: user.uid, ...(status === "cancelled" ? { cancelledAt: now } : {}), updatedAt: now };
     await this.firebase.putDocument(`asyncJobs/${id}`, updated);
     return this.safeJob(updated);
   }
@@ -34,13 +35,14 @@ export class JobsService {
 
   private safeJob(job: RecordValue) {
     return {
-      id: this.stringValue(job.id), type: this.stringValue(job.type), status: this.enum(job.status, ["queued", "running", "completed", "failed", "cancelled"], "queued"),
+      id: this.stringValue(job.id), type: this.stringValue(job.type), status: this.normalizedStatus(job.status),
       progress: Math.max(0, Math.min(100, Math.trunc(Number(job.progress) || 0))), currentSection: this.stringValue(job.currentSection) || undefined,
-      retryable: job.retryable === true, cancellationSupported: ["queued", "running"].includes(this.stringValue(job.status)), failureCode: this.stringValue(job.failureCode) || undefined,
-      sourceRevision: this.stringValue(job.sourceRevision) || undefined, targetFields: Array.isArray(job.targetFields) ? job.targetFields.filter((v): v is string => typeof v === "string") : [], createdAt: this.iso(job.createdAt), updatedAt: this.iso(job.updatedAt),
+      message: this.stringValue(job.message) || undefined, retryable: job.retryable === true, cancellationSupported: ["queued", "running", "cancelling"].includes(this.normalizedStatus(job.status)), safeErrorCode: this.stringValue(job.safeErrorCode) || undefined, safeErrorDetail: this.stringValue(job.safeErrorDetail) || undefined,
+      sourceRevision: this.stringValue(job.sourceRevision) || undefined, targetFields: Array.isArray(job.targetFields) ? job.targetFields.filter((v): v is string => typeof v === "string") : [], createdAt: this.iso(job.createdAt), queuedAt: this.iso(job.queuedAt), startedAt: this.iso(job.startedAt), updatedAt: this.iso(job.updatedAt), completedAt: this.iso(job.completedAt), failedAt: this.iso(job.failedAt), cancelledAt: this.iso(job.cancelledAt),
     };
   }
   private enum(value: unknown, allowed: string[], fallback: string) { const s = this.stringValue(value); return allowed.includes(s) ? s : fallback; }
+  private normalizedStatus(value: unknown) { const status = this.stringValue(value); return this.enum(status === "processing" ? "running" : status, ["queued", "running", "completed", "failed", "cancelling", "cancelled"], "queued"); }
   private iso(value: unknown) { const time = Date.parse(this.stringValue(value)); return Number.isFinite(time) ? new Date(time).toISOString() : undefined; }
   private stringValue(value: unknown) { return typeof value === "string" ? value.trim() : ""; }
 }
