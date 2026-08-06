@@ -13,6 +13,7 @@ import { JobsModule } from "./modules/jobs/jobs.module";
 import { CampaignsModule } from "./modules/campaigns/campaigns.module";
 import { ThemesModule } from "./modules/themes/themes.module";
 import { WorkflowsModule } from "./modules/workflows/workflows.module";
+import { PublicConfigModule } from "./modules/public-config/public-config.module";
 import { SecurityModule } from "./security/security.module";
 @Module({
   imports: [
@@ -42,6 +43,9 @@ import { SecurityModule } from "./security/security.module";
     JobsModule,
     CampaignsModule,
     ThemesModule,
+    // Register static public routes before WorkflowsModule's top-level
+    // `:area` routes so `/config/public` cannot be parsed as a workflow area.
+    PublicConfigModule,
     WorkflowsModule,
   ],
   controllers: [HealthController],
