@@ -42,20 +42,44 @@ describe("ThemesService", () => {
     );
   });
 
-  it("runs AI generation, saves the output, and completes the job", async () => {
+  it("durably queues generation without calling the provider in the request", async () => {
     const theme = { id: "theme-1", organizationId: "org-1", revision: "rev-1", input: { topic: "Hope" }, currentOutput: {}, versions: [] };
     const firebase = {
       getDocument: jest.fn((path: string) => Promise.resolve(path === "themes/theme-1" ? theme : path === "memberships/org-1_user-1" ? { status: "ACTIVE", permissions: ["themes.write"] } : undefined)),
       putDocument: jest.fn().mockResolvedValue(undefined),
     } as unknown as FirebaseService;
-    const generated = { title: "Living Hope", subtitle: "", scriptures: ["1 Peter 1:3"], explanation: "Hope in Christ", pastoralIntroduction: "Welcome", objectives: ["Grow in hope"], weeklyDirection: ["Week 1: Hope"], confession: "I have hope", declaration: "We live in hope", hashtags: ["#LivingHope"], flyerHeadline: "Living Hope", designConcept: "Sunrise" };
-    const generator = { generate: jest.fn().mockResolvedValue(generated) } as unknown as ThemeGenerationService;
+    const generator = { generate: jest.fn() } as unknown as ThemeGenerationService;
 
     const result = await new ThemesService(firebase, generator).generate(identity, "theme-1");
 
-    expect(result).toEqual(expect.objectContaining({ status: "completed", progress: 100, sourceRevision: "rev-1" }));
-    expect(generator.generate).toHaveBeenCalledWith(theme.input, theme.currentOutput, undefined);
-    expect(firebase.putDocument).toHaveBeenCalledWith("themes/theme-1", expect.objectContaining({ currentOutput: generated }));
-    expect(firebase.putDocument).toHaveBeenCalledWith(expect.stringMatching(/^asyncJobs\//), expect.objectContaining({ status: "completed", progress: 100 }));
+    expect(result).toEqual(expect.objectContaining({ status: "queued", progress: 0, sourceRevision: "rev-1", cancellationSupported: true }));
+    expect(generator.generate).not.toHaveBeenCalled();
+    expect(firebase.putDocument).toHaveBeenCalledWith(expect.stringMatching(/^asyncJobs\//), expect.objectContaining({ status: "queued", progress: 0 }));
+  });
+
+  it("returns the same generation job for an idempotent retry", async () => {
+    const theme = { id: "theme-1", organizationId: "org-1", revision: "rev-1", input: { topic: "Hope" }, currentOutput: {}, versions: [] };
+    let savedJob: Record<string, unknown> | undefined;
+    const putDocument = jest.fn((path: string, value: Record<string, unknown>) => {
+      if (path.startsWith("asyncJobs/")) savedJob = value;
+      return Promise.resolve();
+    });
+    const firebase = {
+      getDocument: jest.fn((path: string) => Promise.resolve(
+        path === "themes/theme-1" ? theme
+          : path === "memberships/org-1_user-1" ? { status: "ACTIVE", permissions: ["themes.write"] }
+            : path.startsWith("asyncJobs/") ? savedJob : undefined,
+      )),
+      putDocument,
+    } as unknown as FirebaseService;
+    const generator = { generate: jest.fn() } as unknown as ThemeGenerationService;
+    const service = new ThemesService(firebase, generator);
+
+    const first = await service.generate(identity, "theme-1", {}, "retry-key");
+    const second = await service.generate(identity, "theme-1", {}, "retry-key");
+
+    expect(second).toEqual(first);
+    expect(putDocument.mock.calls.filter(([path]) => path.startsWith("asyncJobs/"))).toHaveLength(1);
+    expect(generator.generate).not.toHaveBeenCalled();
   });
 });
