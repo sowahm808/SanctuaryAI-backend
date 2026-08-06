@@ -26,8 +26,8 @@ export class ThemeGenerationQueue implements OnModuleInit, OnModuleDestroy {
   async publish(payload: ThemeQueuePayload): Promise<void> {
     try {
       await this.command("RPUSH", THEME_GENERATION_QUEUE, JSON.stringify(payload));
-    } catch {
-      this.logger.error({ event: "theme.generation.enqueue_failed", jobId: payload.jobId, correlationId: payload.correlationId }, "Theme generation queue publish failed");
+    } catch (error) {
+      this.logger.error({ event: "theme.generation.enqueue_failed", jobId: payload.jobId, correlationId: payload.correlationId, error: error instanceof Error ? error.message : "redis_command_failed" }, "Theme generation queue publish failed");
       throw new ServiceUnavailableException({ code: "generation_queue_unavailable", message: "Theme generation cannot be queued right now. Please retry shortly." });
     }
   }
@@ -56,12 +56,18 @@ export class ThemeGenerationQueue implements OnModuleInit, OnModuleDestroy {
       const options = { host: redisUrl.hostname, port: Number(redisUrl.port || (redisUrl.protocol === "rediss:" ? 6380 : 6379)), servername: redisUrl.hostname };
       const socket: Socket | TLSSocket = redisUrl.protocol === "rediss:" ? connectTls(options) : connectTcp(options);
       const commands: string[] = [];
-      if (redisUrl.password) commands.push(this.resp("AUTH", decodeURIComponent(redisUrl.password)));
+      const username = decodeURIComponent(redisUrl.username);
+      const password = decodeURIComponent(redisUrl.password);
+      // Managed Redis providers commonly use Redis 6 ACL URLs of the form
+      // redis[s]://user:password@host. AUTH with only the password fails for
+      // non-default users, even though the URL itself is valid.
+      if (username) commands.push(this.resp("AUTH", username, password));
+      else if (password) commands.push(this.resp("AUTH", password));
       if (redisUrl.pathname.length > 1) commands.push(this.resp("SELECT", redisUrl.pathname.slice(1)));
       commands.push(this.resp(...parts));
       let index = 0; let buffer = Buffer.alloc(0);
       const timeout = setTimeout(() => socket.destroy(new Error("redis timeout")), 3_000);
-      socket.once("error", reject);
+      socket.once("error", (error) => { clearTimeout(timeout); reject(error instanceof Error ? error : new Error("redis connection failed")); });
       socket.on("data", (chunk: Buffer) => {
         buffer = Buffer.concat([buffer, chunk]);
         while (true) {
@@ -73,7 +79,7 @@ export class ThemeGenerationQueue implements OnModuleInit, OnModuleDestroy {
           socket.write(commands[index]);
         }
       });
-      socket.once("connect", () => socket.write(commands[0]));
+      socket.once(redisUrl.protocol === "rediss:" ? "secureConnect" : "connect", () => socket.write(commands[0]));
     });
   }
 
@@ -88,4 +94,3 @@ export class ThemeGenerationQueue implements OnModuleInit, OnModuleDestroy {
     return { bytes: total, value: data.subarray(lineEnd + 2, lineEnd + 2 + length).toString("utf8") };
   }
 }
-
