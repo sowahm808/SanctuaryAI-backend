@@ -12,6 +12,7 @@ describe("environmentSchema", () => {
       REDIS_URL: "redis://localhost:6379",
       TOKEN_ENCRYPTION_KEY: "encryption-key",
       CORS_ORIGINS: "https://example.com",
+      OPENAI_API_KEY: "openai-api-key",
     });
 
     expect(result.error).toBeUndefined();
