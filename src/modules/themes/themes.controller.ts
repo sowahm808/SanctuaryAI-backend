@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, Patch, Post, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { FirebaseIdentity } from "../../database/firebase.service";
 import { CurrentUser, FirebaseAuthGuard } from "../../security/firebase-auth.guard";
@@ -9,8 +9,8 @@ export class ThemesController{constructor(private readonly themes:ThemesService)
  @Post() create(@CurrentUser() u:FirebaseIdentity,@Body() d:ThemeInputDto){return this.themes.create(u,d)}
  @Get(":id") get(@CurrentUser() u:FirebaseIdentity,@Param("id") id:string){return this.themes.get(u,id)}
  @Patch(":id/input") input(@CurrentUser() u:FirebaseIdentity,@Param("id") id:string,@Body() d:ThemePatchInputDto){return this.themes.patchInput(u,id,d)}
- @Post(":id/generate") generate(@CurrentUser() u:FirebaseIdentity,@Param("id") id:string,@Body() d:Partial<ThemeRefineDto>){return this.themes.generate(u,id,d)}
- @Post(":id/refine") refine(@CurrentUser() u:FirebaseIdentity,@Param("id") id:string,@Body() d:ThemeRefineDto){return this.themes.refine(u,id,d)}
+ @Post(":id/generate") @HttpCode(HttpStatus.ACCEPTED) generate(@CurrentUser() u:FirebaseIdentity,@Param("id") id:string,@Headers("idempotency-key") key:string|undefined,@Body() d:Partial<ThemeRefineDto>){return this.themes.generate(u,id,d,key)}
+ @Post(":id/refine") @HttpCode(HttpStatus.ACCEPTED) refine(@CurrentUser() u:FirebaseIdentity,@Param("id") id:string,@Headers("idempotency-key") key:string|undefined,@Body() d:ThemeRefineDto){return this.themes.refine(u,id,d,key)}
  @Post(":id/generation-jobs/:jobId/cancel") cancel(){return {status:"use_shared_endpoint", href:"/api/v1/jobs/:jobId/cancel"}}
  @Patch(":id/output") output(@CurrentUser() u:FirebaseIdentity,@Param("id") id:string,@Body() d:ThemeOutputDto){return this.themes.output(u,id,d)}
  @Get(":id/preview") preview(@CurrentUser() u:FirebaseIdentity,@Param("id") id:string){return this.themes.preview(u,id)}
