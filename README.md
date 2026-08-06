@@ -74,3 +74,10 @@ do not assume the Docker Compose hostname exists on Render. If API and worker
 processes are separated in the future, both must receive the same Redis,
 provider, and Firebase configuration. Validate connectivity without exposing
 credentials by running `npm run redis:ping`.
+
+The API producer uses one retry per command, disables ioredis offline queueing,
+and gives queue publication a 10-second hard deadline. The in-process worker
+uses a separate BullMQ-compatible connection with `maxRetriesPerRequest: null`.
+Use `rediss://` exactly when the Render connection requires TLS (including when
+Render documents its CLI invocation with `redis-cli --tls`); plain `redis://`
+does not enable TLS. From the Render service shell, run `npm run redis:ping`.

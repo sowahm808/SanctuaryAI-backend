@@ -22,8 +22,10 @@ export class ProblemFilter implements ExceptionFilter {
     const detail =
       typeof value === "string"
         ? value
-        : value && typeof value === "object" && "message" in value && typeof value.message === "string"
-          ? value.message
+        : value && typeof value === "object" && "detail" in value && typeof value.detail === "string"
+          ? value.detail
+          : value && typeof value === "object" && "message" in value && typeof value.message === "string"
+            ? value.message
           : "The request could not be completed.";
     const body = typeof value === "object" && value !== null ? value : {};
     const messages = "message" in body && Array.isArray(body.message)
@@ -47,8 +49,8 @@ export class ProblemFilter implements ExceptionFilter {
       .json({
         code,
         detail,
-        correlationId: requestContext.getStore()?.correlationId,
-        validation: messages.map((message) => ({
+        correlationId: "correlationId" in body && typeof body.correlationId === "string" ? body.correlationId : requestContext.getStore()?.correlationId,
+        validation: "validation" in body && Array.isArray(body.validation) ? body.validation : messages.map((message) => ({
           field: message.split(" ", 1)[0] ?? "request",
           code: "invalid",
           message,

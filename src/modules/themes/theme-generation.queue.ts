@@ -1,29 +1,39 @@
 import {
   Injectable,
+  Inject,
   Logger,
+  OnModuleDestroy,
   ServiceUnavailableException,
 } from "@nestjs/common";
-import { InjectQueue } from "@nestjs/bullmq";
 import { Queue } from "bullmq";
-import { redisErrorCategory } from "../../config/redis";
+import { withTimeout } from "../../common/with-timeout";
+import { redisErrorCategory, sanitizedRedisErrorMessage } from "../../config/redis";
 import {
   THEME_GENERATION_JOB,
   THEME_GENERATION_QUEUE,
 } from "./theme-generation.constants";
 import type { ThemeQueuePayload } from "./theme-generation.processor";
 
+export const THEME_GENERATION_PRODUCER = Symbol("THEME_GENERATION_PRODUCER");
+
 @Injectable()
-export class ThemeGenerationQueue {
+export class ThemeGenerationQueue implements OnModuleDestroy {
   private readonly logger = new Logger(ThemeGenerationQueue.name);
+  static readonly PUBLISH_TIMEOUT_MS: number = 10_000;
+  static readonly READINESS_TIMEOUT_MS = 5_000;
 
   constructor(
-    @InjectQueue(THEME_GENERATION_QUEUE)
+    @Inject(THEME_GENERATION_PRODUCER)
     private readonly queue: Queue<ThemeQueuePayload>,
   ) {}
 
+  async onModuleDestroy(): Promise<void> { await this.queue.close(); }
+
   async publish(payload: ThemeQueuePayload): Promise<string> {
+    const startedAt = Date.now();
+    this.logger.log({ event: "theme.generation.queue_publish_started", correlationId: payload.correlationId, durableJobId: payload.jobId, queueName: THEME_GENERATION_QUEUE, timeoutMs: ThemeGenerationQueue.PUBLISH_TIMEOUT_MS }, "Publishing theme generation job");
     try {
-      const job = await this.queue.add(
+      const job = await withTimeout(this.queue.add(
         THEME_GENERATION_JOB,
         payload,
         {
@@ -36,22 +46,26 @@ export class ThemeGenerationQueue {
           removeOnComplete: 100,
           removeOnFail: 100,
         },
-      );
+      ), ThemeGenerationQueue.PUBLISH_TIMEOUT_MS, "queue_publish_timeout");
 
       if (!job.id) {
         throw new Error("queue_job_id_missing");
       }
 
+      this.logger.log({ event: "theme.generation.queued", correlationId: payload.correlationId, durableJobId: payload.jobId, queueJobId: job.id, queueName: THEME_GENERATION_QUEUE, elapsedMs: Date.now() - startedAt }, "Theme generation queued");
       return job.id;
     } catch (error) {
+      const errorCode = redisErrorCategory(error);
       this.logger.error(
         {
           event: "theme.generation.enqueue_failed",
           correlationId: payload.correlationId,
           durableJobId: payload.jobId,
           queueName: THEME_GENERATION_QUEUE,
+          elapsedMs: Date.now() - startedAt,
           errorName: error instanceof Error ? error.name : "Error",
-          errorCode: redisErrorCategory(error),
+          errorCode,
+          sanitizedErrorMessage: sanitizedRedisErrorMessage(errorCode),
         },
         "Theme generation queue publish failed",
       );
@@ -72,7 +86,7 @@ export class ThemeGenerationQueue {
     };
   }> {
     try {
-      await this.queue.waitUntilReady();
+      await withTimeout(this.queue.waitUntilReady(), ThemeGenerationQueue.READINESS_TIMEOUT_MS, "queue_readiness_timeout");
 
       return {
         queue: {
