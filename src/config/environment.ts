@@ -33,5 +33,6 @@ export const environmentSchema = Joi.object({
 
   // OPENAI_API_KEY: Joi.string().allow("").optional(),
   OPENAI_API_KEY: Joi.string().required(),
+  OPENAI_MODEL: Joi.string().default("gpt-4o-mini"),
   SWAGGER_ENABLED: Joi.boolean().default(true),
 });
