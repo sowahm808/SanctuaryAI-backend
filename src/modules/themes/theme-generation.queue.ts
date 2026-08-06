@@ -33,20 +33,28 @@ export class ThemeGenerationQueue implements OnModuleDestroy {
     const startedAt = Date.now();
     this.logger.log({ event: "theme.generation.queue_publish_started", correlationId: payload.correlationId, durableJobId: payload.jobId, queueName: THEME_GENERATION_QUEUE, timeoutMs: ThemeGenerationQueue.PUBLISH_TIMEOUT_MS }, "Publishing theme generation job");
     try {
-      const job = await withTimeout(this.queue.add(
-        THEME_GENERATION_JOB,
-        payload,
-        {
-          jobId: payload.jobId,
-          attempts: 3,
-          backoff: {
-            type: "exponential",
-            delay: 5_000,
+      // The producer disables ioredis offline queueing so a command issued while
+      // the connection is still being established fails immediately. BullMQ
+      // connections are lazy, which made the first generation request after a
+      // deploy intermittently return 503 even when Redis was healthy. Wait for
+      // the connection inside the existing hard deadline before publishing.
+      const job = await withTimeout((async () => {
+        await this.queue.waitUntilReady();
+        return this.queue.add(
+          THEME_GENERATION_JOB,
+          payload,
+          {
+            jobId: payload.jobId,
+            attempts: 3,
+            backoff: {
+              type: "exponential",
+              delay: 5_000,
+            },
+            removeOnComplete: 100,
+            removeOnFail: 100,
           },
-          removeOnComplete: 100,
-          removeOnFail: 100,
-        },
-      ), ThemeGenerationQueue.PUBLISH_TIMEOUT_MS, "queue_publish_timeout");
+        );
+      })(), ThemeGenerationQueue.PUBLISH_TIMEOUT_MS, "queue_publish_timeout");
 
       if (!job.id) {
         throw new Error("queue_job_id_missing");

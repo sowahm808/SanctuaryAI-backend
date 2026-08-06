@@ -21,16 +21,32 @@ describe("Redis configuration", () => {
 describe("ThemeGenerationQueue", () => {
   it("publishes the shared BullMQ job and returns its id", async () => {
     const add = jest.fn().mockResolvedValue({ id: "job-1" });
-    const waitUntilReady = jest.fn();
+    const waitUntilReady = jest.fn().mockResolvedValue(undefined);
     const producer = new ThemeGenerationQueue({ add, waitUntilReady } as unknown as Queue<ThemeQueuePayload>);
     await expect(producer.publish(payload)).resolves.toBe("job-1");
     expect(add).toHaveBeenCalledWith(THEME_GENERATION_JOB, payload, expect.objectContaining({ jobId: "job-1", attempts: 3 }));
-    expect(waitUntilReady).not.toHaveBeenCalled();
+    expect(waitUntilReady).toHaveBeenCalledTimes(1);
+    expect(waitUntilReady.mock.invocationCallOrder[0]).toBeLessThan(add.mock.invocationCallOrder[0]);
     expect(THEME_GENERATION_QUEUE).toBe("theme-generation");
   });
 
+  it("waits for a lazy Redis connection before publishing", async () => {
+    let markReady!: () => void;
+    const waitUntilReady = jest.fn(() => new Promise<void>((resolve) => { markReady = resolve; }));
+    const add = jest.fn().mockResolvedValue({ id: "job-1" });
+    const producer = new ThemeGenerationQueue({ add, waitUntilReady } as unknown as Queue<ThemeQueuePayload>);
+
+    const publication = producer.publish(payload);
+    await Promise.resolve();
+    expect(add).not.toHaveBeenCalled();
+    markReady();
+
+    await expect(publication).resolves.toBe("job-1");
+    expect(add).toHaveBeenCalledTimes(1);
+  });
+
   it("returns only a safe queue error when Redis publication fails", async () => {
-    const producer = new ThemeGenerationQueue({ add: jest.fn().mockRejectedValue(new Error("WRONGPASS secret-infrastructure-detail")) } as unknown as Queue<ThemeQueuePayload>);
+    const producer = new ThemeGenerationQueue({ waitUntilReady: jest.fn().mockResolvedValue(undefined), add: jest.fn().mockRejectedValue(new Error("WRONGPASS secret-infrastructure-detail")) } as unknown as Queue<ThemeQueuePayload>);
     const promise = producer.publish(payload);
     await expect(promise).rejects.toBeInstanceOf(ServiceUnavailableException);
     await expect(promise).rejects.toMatchObject({ response: { code: "generation_queue_unavailable", detail: "Theme generation cannot be queued right now. Please retry shortly.", correlationId: "correlation-1", validation: [] } });
@@ -39,7 +55,7 @@ describe("ThemeGenerationQueue", () => {
 
   it("times out a queue publication that never settles", async () => {
     jest.useFakeTimers();
-    const producer = new ThemeGenerationQueue({ add: jest.fn(() => new Promise(() => undefined)) } as unknown as Queue<ThemeQueuePayload>);
+    const producer = new ThemeGenerationQueue({ waitUntilReady: jest.fn().mockResolvedValue(undefined), add: jest.fn(() => new Promise(() => undefined)) } as unknown as Queue<ThemeQueuePayload>);
     const promise = producer.publish(payload);
     await jest.advanceTimersByTimeAsync(ThemeGenerationQueue.PUBLISH_TIMEOUT_MS);
     await expect(promise).rejects.toMatchObject({ response: { code: "generation_queue_unavailable", correlationId: "correlation-1" } });
