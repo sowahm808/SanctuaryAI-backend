@@ -32,7 +32,11 @@ export const environmentSchema = Joi.object({
   CORS_ORIGINS: Joi.string().required(),
 
   // OPENAI_API_KEY: Joi.string().allow("").optional(),
-  OPENAI_API_KEY: Joi.string().required(),
-  OPENAI_MODEL: Joi.string().default("gpt-4o-mini"),
+  OPENAI_API_KEY: Joi.string().trim().min(1).custom((value: string, helpers) => (/^['"]|['"]$/.test(value) || /[\r\n]/.test(value) ? helpers.error("string.invalid") : value)).required(),
+  OPENAI_MODEL: Joi.string().trim().min(1).default("gpt-4o-mini"),
+  AI_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1000).max(300000).default(90000),
+  THEME_GENERATION_MAX_ATTEMPTS: Joi.number().integer().min(1).max(10).default(3),
+  THEME_GENERATION_STUCK_JOB_MINUTES: Joi.number().integer().min(1).default(15),
+  THEME_GENERATION_CONCURRENCY: Joi.number().integer().min(1).max(20).default(1),
   SWAGGER_ENABLED: Joi.boolean().default(true),
 });

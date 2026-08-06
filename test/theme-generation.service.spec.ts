@@ -53,10 +53,7 @@ describe("ThemeGenerationService", () => {
     }), { status: 401, headers: { "x-request-id": "provider-request-id" } }));
 
     await expect(new ThemeGenerationService(config).generate({ topic: "Hope" }, {})).rejects.toMatchObject({
-      response: {
-        code: "theme_generation_failed",
-        message: "The AI provider could not generate this theme. Please try again.",
-      },
+      safeCode: "ai_provider_misconfigured", retryable: false,
     });
     expect(fetch).toHaveBeenCalledTimes(1);
   });

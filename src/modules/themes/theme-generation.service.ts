@@ -1,4 +1,4 @@
-import { Injectable, Logger, ServiceUnavailableException } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 
 type RecordValue = Record<string, unknown>;
@@ -26,15 +26,20 @@ interface ChatCompletion {
 
 const MAX_ATTEMPTS = 3;
 
+export class ThemeGenerationError extends Error {
+  constructor(public readonly safeCode: string, public readonly safeDetail: string, public readonly retryable: boolean) { super(safeDetail); }
+}
+
 @Injectable()
 export class ThemeGenerationService {
   private readonly logger = new Logger(ThemeGenerationService.name);
 
   constructor(private readonly config: ConfigService) {}
 
-  async generate(input: RecordValue, currentOutput: RecordValue, scope?: string): Promise<RecordValue> {
-    const apiKey = this.config.getOrThrow<string>("OPENAI_API_KEY");
-    const model = this.config.get<string>("OPENAI_MODEL") ?? "gpt-4o-mini";
+  async generate(input: RecordValue, currentOutput: RecordValue, scope?: string, context: RecordValue = {}): Promise<RecordValue> {
+    const apiKey = this.config.getOrThrow<string>("OPENAI_API_KEY")?.trim();
+    const model = this.config.get<string>("OPENAI_MODEL")?.trim();
+    if (!apiKey || !model) throw new ThemeGenerationError("ai_provider_misconfigured", "The AI provider is not configured.", false);
     let response: Response | undefined;
     let lastAttempt = 0;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
@@ -43,7 +48,7 @@ export class ThemeGenerationService {
         response = await fetch("https://api.openai.com/v1/chat/completions", {
           method: "POST",
           headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-          signal: AbortSignal.timeout(90_000),
+          signal: AbortSignal.timeout(typeof this.config.get<number>("AI_REQUEST_TIMEOUT_MS") === "number" ? this.config.get<number>("AI_REQUEST_TIMEOUT_MS")! : 90_000),
           body: JSON.stringify({
             model,
             messages: [
@@ -53,34 +58,34 @@ export class ThemeGenerationService {
             response_format: { type: "json_schema", json_schema: { name: "church_theme", strict: true, schema: THEME_SCHEMA } },
           }),
         });
-      } catch (error) {
-        this.logFailure("request_error", model, attempt, undefined, error);
-        if (attempt === MAX_ATTEMPTS) throw this.unavailable();
+      } catch {
+        this.logFailure("request_error", model, attempt, context);
+        if (attempt === MAX_ATTEMPTS) throw new ThemeGenerationError("ai_provider_timeout", "The AI provider timed out.", true);
         continue;
       }
       if (response.ok || !this.retryable(response.status) || attempt === MAX_ATTEMPTS) break;
-      this.logFailure("retryable_response", model, attempt, response.status);
+      this.logFailure("retryable_response", model, attempt, context, response.status);
     }
 
-    if (!response) throw this.unavailable();
+    if (!response) throw new ThemeGenerationError("ai_provider_unavailable", "The AI provider is temporarily unavailable.", true);
 
     const body = await response.json().catch(() => ({})) as ChatCompletion;
     if (!response.ok) {
-      this.logFailure("provider_response", model, lastAttempt, response.status, body.error, response.headers.get("x-request-id") ?? undefined);
-      throw this.unavailable();
+      this.logFailure("provider_response", model, lastAttempt, context, response.status, response.headers.get("x-request-id") ?? undefined);
+      throw this.classify(response.status);
     }
     const content = body.choices?.[0]?.message?.content;
     if (!content) {
-      this.logFailure("empty_response", model, lastAttempt, response.status, body.error, response.headers.get("x-request-id") ?? undefined);
-      throw this.unavailable();
+      this.logFailure("empty_response", model, lastAttempt, context, response.status, response.headers.get("x-request-id") ?? undefined);
+      throw new ThemeGenerationError("ai_response_invalid", "The AI provider returned an invalid response.", false);
     }
     try {
       const result = JSON.parse(content) as unknown;
       if (!this.valid(result)) throw new Error("invalid output");
       return result;
-    } catch (error) {
-      this.logFailure("invalid_response", model, lastAttempt, response.status, error, response.headers.get("x-request-id") ?? undefined);
-      throw this.unavailable();
+    } catch {
+      this.logFailure("invalid_response", model, lastAttempt, context, response.status, response.headers.get("x-request-id") ?? undefined);
+      throw new ThemeGenerationError("ai_response_invalid", "The AI provider returned an invalid response.", false);
     }
   }
 
@@ -88,15 +93,14 @@ export class ThemeGenerationService {
     return status === 408 || status === 409 || status === 429 || status >= 500;
   }
 
-  private logFailure(reason: string, model: string, attempt: number, status?: number, error?: unknown, providerRequestId?: string): void {
-    const providerError = error && typeof error === "object" ? error as RecordValue : undefined;
+  private logFailure(reason: string, model: string, attempt: number, context: RecordValue, status?: number, providerRequestId?: string): void {
     this.logger.error({
       reason,
       model,
       attempt,
+      correlationId: context.correlationId, jobId: context.jobId, organizationId: context.organizationId, themeId: context.themeId,
       ...(status === undefined ? {} : { status }),
       ...(providerRequestId ? { providerRequestId } : {}),
-      ...(providerError ? { providerError: { code: providerError.code, type: providerError.type, message: providerError.message } } : {}),
     }, "OpenAI theme generation failed");
   }
 
@@ -112,7 +116,5 @@ export class ThemeGenerationService {
     return true;
   }
 
-  private unavailable() {
-    return new ServiceUnavailableException({ code: "theme_generation_failed", message: "The AI provider could not generate this theme. Please try again." });
-  }
+  private classify(status: number) { if ([401,403,404].includes(status)) return new ThemeGenerationError("ai_provider_misconfigured", "The AI provider is not configured correctly.", false); if (status === 408) return new ThemeGenerationError("ai_provider_timeout", "The AI provider timed out.", true); if (status === 400) return new ThemeGenerationError("provider_invalid_request", "The AI provider rejected the generation request.", false); return new ThemeGenerationError("ai_provider_unavailable", "The AI provider is temporarily unavailable.", this.retryable(status)); }
 }
