@@ -1,6 +1,7 @@
-import { ConflictException } from "@nestjs/common";
+import { ConflictException, ValidationPipe } from "@nestjs/common";
 import { FirebaseService } from "../src/database/firebase.service";
 import { OrganizationsService } from "../src/modules/organizations/organizations.service";
+import { CreateOrganizationDto } from "../src/modules/organizations/dto";
 
 /* Jest mocks intentionally use dynamic asymmetric matcher values. */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/unbound-method */
@@ -26,6 +27,30 @@ function firebaseMock(overrides: Partial<FirebaseService> = {}): FirebaseService
 }
 
 describe("OrganizationsService", () => {
+  it("accepts and normalizes the onboarding form payload", async () => {
+    const payload = await new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }).transform({
+      setupMode: "create", name: "Salvation Church", primaryLogo: "churchlogo.jpg", primaryLogoAlt: "Church logo",
+      secondaryLogo: "", secondaryLogoAlt: "", logoCropInstructions: "Make it fit", physicalAddress: "5909 Liverpool Street",
+      digitalAddress: "", phone: "6823736649", email: "sowahm808@gmail.com", website: "", hashtags: "faith, salvation",
+      socialChannels: "https://facebook.com/church", serviceDays: "Sunday", serviceTimes: "9am",
+      teamInvitations: "teammate@example.com", socialConnectionNotes: "",
+    }, { type: "body", metatype: CreateOrganizationDto }) as CreateOrganizationDto;
+
+    expect(payload).toEqual(expect.objectContaining({
+      primaryLogo: { fileName: "churchlogo.jpg", alt: "Church logo", cropInstructions: "Make it fit" },
+      secondaryLogo: undefined,
+      socialChannels: ["https://facebook.com/church"], serviceDays: ["Sunday"], serviceTimes: ["9am"],
+      teamInvitations: ["teammate@example.com"], socialConnectionNotes: [], hashtags: ["faith", "salvation"],
+    }));
+
+    const firebase = firebaseMock();
+    const result = await new OrganizationsService(firebase).create(identity, payload);
+    expect(result.organization).toEqual(expect.objectContaining({
+      contact: { physicalAddress: "5909 Liverpool Street", phone: "6823736649", email: "sowahm808@gmail.com" },
+      defaultHashtags: ["faith", "salvation"],
+    }));
+  });
+
   it("creates an organization, owner membership, and selects it for the user", async () => {
     const firebase = firebaseMock();
     const result = await new OrganizationsService(firebase).create(identity, {
