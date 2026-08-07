@@ -110,7 +110,7 @@ export class OrganizationsService {
 
     const membership = await this.resolveMembership(organizationId, userId);
     const membershipStatus = this.stringValue(membership?.status);
-    if (membershipStatus !== "ACTIVE" || !this.stringArray(membership?.permissions).includes(permission)) {
+    if (membershipStatus !== "ACTIVE" || !this.hasPermission(membership, permission)) {
       this.logAccessDenied(userId, organizationId, permission, membershipStatus || undefined);
       throw new ForbiddenException({ code: "organization_permission_missing", message: "An active organization membership with permission is required." });
     }
@@ -136,6 +136,14 @@ export class OrganizationsService {
   private logAccessDenied(userId: string, organizationId: string | undefined, requiredPermission: string, membershipStatus: string | undefined): void {
     if (process.env.NODE_ENV === "production") return;
     this.logger.warn({ event: "brand_kit.access_denied", userId, organizationId, requiredPermission, membershipStatus });
+  }
+  private hasPermission(membership: RecordValue | undefined, permission: string): boolean {
+    const permissions = this.stringArray(membership?.permissions);
+    const role = this.stringValue(membership?.role);
+    return permissions.includes(permission)
+      || permissions.includes("admin")
+      || role === "ChurchAdministrator"
+      || role === "SuperAdministrator";
   }
   private profileFields(dto: Partial<CreateOrganizationDto>) {
     const keys = ["slogan","description","seniorPastor","primaryColor","secondaryColor","headingFont","bodyFont","primaryLogo","secondaryLogo","contact","socialChannels","serviceDays","serviceTimes","bibleTranslation","ministryTone","statementOfFaith","doctrinalGuidelines","prohibitedContent","defaultHashtags","defaultFooter","teamInvitations","socialConnectionNotes","firstCampaignChoice"] as const;

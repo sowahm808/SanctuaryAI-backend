@@ -59,6 +59,19 @@ describe("OrganizationsService", () => {
     await expect(new OrganizationsService(firebase).brandKit(identity)).rejects.toBeInstanceOf(ForbiddenException);
   });
 
+  it.each(["ChurchAdministrator", "SuperAdministrator"])("allows an active %s to read the brand kit when legacy membership permissions are incomplete", async (role) => {
+    const documents = activeDocuments({ id: "kit-1", organizationId: "org-1", colorPalette: [], fontFamilies: [] });
+    const firebase = firebaseMock({ getDocument: jest.fn(async (path: string) => path === "memberships/org-1_firebase-user" ? { organizationId: "org-1", userId: "firebase-user", status: "ACTIVE", role, permissions: [] } : documents(path)) });
+    await expect(new OrganizationsService(firebase).brandKit(identity)).resolves.toEqual({ id: "kit-1", organizationId: "org-1", colorPalette: [], fontFamilies: [] });
+  });
+
+  it("allows an active administrator to update the brand kit when legacy membership permissions are incomplete", async () => {
+    const documents = activeDocuments();
+    const firebase = firebaseMock({ getDocument: jest.fn(async (path: string) => path === "memberships/org-1_firebase-user" ? { organizationId: "org-1", userId: "firebase-user", status: "ACTIVE", role: "ChurchAdministrator", permissions: [] } : documents(path)) });
+    await expect(new OrganizationsService(firebase).patchBrandKit(identity, { colorPalette: ["#112233"] })).resolves.toEqual({ id: "org-1", organizationId: "org-1", colorPalette: ["#112233"], fontFamilies: [] });
+    expect(firebase.putDocument).toHaveBeenCalledWith("brandKits/org-1", expect.objectContaining({ colorPalette: ["#112233"] }));
+  });
+
   it("resolves a Firebase UID to the internal membership user ID", async () => {
     const getDocument = jest.fn((path: string) => Promise.resolve(path === "organizations/org-1" ? { id: "org-1" } : path === "brandKits/org-1" ? undefined : undefined));
     const queryDocuments = jest.fn((collection: string) => Promise.resolve(collection === "users"
