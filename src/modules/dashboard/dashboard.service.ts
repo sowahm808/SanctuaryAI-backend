@@ -1,7 +1,8 @@
-import { ForbiddenException, Injectable, ServiceUnavailableException } from "@nestjs/common";
+import { ForbiddenException, Injectable } from "@nestjs/common";
 import { createHash } from "node:crypto";
 import { FirebaseIdentity } from "../../database/firebase.service";
 import { FirebaseService } from "../../database/firebase.service";
+import { DashboardSummaryRepository } from "./dashboard-summary.repository";
 
 const DASHBOARD_READ = ["themes.read", "sermons.create", "social.schedule"];
 const INTERNAL_PATH = /^\/app\/[A-Za-z0-9/_?.=&:%-]+$/;
@@ -10,7 +11,10 @@ export interface DashboardResponse { summary: Record<string, unknown>; etag: str
 
 @Injectable()
 export class DashboardService {
-  constructor(private readonly firebase: FirebaseService) {}
+  constructor(
+    private readonly firebase: FirebaseService,
+    private readonly summaries: DashboardSummaryRepository,
+  ) {}
 
   async summary(user: FirebaseIdentity): Promise<DashboardResponse> {
     const session = await this.resolveSession(user);
@@ -22,15 +26,44 @@ export class DashboardService {
       throw new ForbiddenException({ code: "organization_permission_missing", message: "The active membership cannot read dashboard data." });
     }
 
-    const readModel = await this.firebase.getDocument(`dashboardSummaries/${session.organizationId}`);
+    const readModel = await this.summaries.findByOrganizationId(session.organizationId);
     const generatedAt = this.iso(readModel?.generatedAt) ?? new Date().toISOString();
-    const stale = readModel?.stale === true;
-    const useful = readModel || !stale;
-    if (!useful) throw new ServiceUnavailableException({ code: "dashboard_unavailable", message: "The dashboard is temporarily unavailable." });
-
     const summary = this.normalizeSummary(readModel ?? {}, generatedAt, permissions);
     const etag = `W/"${createHash("sha256").update(JSON.stringify(summary)).digest("base64url")}"`;
     return { summary, etag };
+  }
+
+  /** Rebuild the cached read model out of tenant-scoped source collections. */
+  async rebuildDashboardSummary(organizationId: string): Promise<Record<string, unknown>> {
+    const collections = ["themes", "prayers", "declarations", "flyers", "approvals", "asyncJobs"] as const;
+    const [themes, prayers, declarations, flyers, approvals, jobs] = await Promise.all(
+      collections.map((collection) => this.firebase.queryDocuments(collection, "organizationId", organizationId, "updatedAt", "desc", 100)),
+    );
+    const generatedAt = new Date().toISOString();
+    const content = [
+      ["themes", "Themes", themes], ["prayers", "Prayers", prayers],
+      ["declarations", "Declarations", declarations], ["flyers", "Flyers", flyers],
+    ] as const;
+    const document: Record<string, unknown> = {
+      generatedAt,
+      stale: false,
+      metrics: [
+        ...content.map(([kind, label, items]) => ({ kind, label, value: items.length, severity: "info" })),
+        { kind: "pending_approvals", label: "Pending approvals", value: approvals.filter((item) => ["pending_approval", "in_review"].includes(this.stringValue(item.status))).length, severity: "info" },
+      ],
+      workItems: [...approvals, ...jobs].slice(0, 20).map((item) => ({
+        id: this.stringValue(item.id), title: this.stringValue(item.title) || this.stringValue(item.type) || "Work item",
+        type: this.stringValue(item.type), status: this.stringValue(item.status), detail: this.stringValue(item.detail),
+        href: "/app/dashboard", updatedAt: this.iso(item.updatedAt) ?? generatedAt, category: "deadline",
+      })),
+      recentContent: content.flatMap(([type, , items]) => items.map((item) => ({
+        id: this.stringValue(item.id), title: this.stringValue(item.title) || "Untitled", type,
+        label: this.stringValue(item.status), href: "/app/content", updatedAt: this.iso(item.updatedAt) ?? generatedAt,
+      }))).sort((left, right) => String(right.updatedAt).localeCompare(String(left.updatedAt))).slice(0, 20),
+      channels: [], sectionIssues: [], scheduledPosts: [], publishingFailures: [], quickActions: [], aiUsage: null,
+    };
+    await this.summaries.save(organizationId, document);
+    return document;
   }
 
   private async resolveSession(user: FirebaseIdentity) {

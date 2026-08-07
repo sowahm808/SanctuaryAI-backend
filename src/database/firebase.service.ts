@@ -84,7 +84,7 @@ export class FirebaseService {
     return this.config.getOrThrow<string>("FIREBASE_API_KEY");
   }
 
-  private async json<T>(url: string, init?: RequestInit): Promise<T> {
+  private async json<T>(url: string, init?: RequestInit, expectedHttpStatuses: readonly number[] = []): Promise<T> {
     const response = await fetch(url, {
       ...init,
       signal: AbortSignal.timeout(10_000),
@@ -106,14 +106,16 @@ export class FirebaseService {
         firebaseDetails: provider?.details,
         rawBody: raw,
       };
-      this.logger.error({
-        event: "firebase.request_failed",
-        httpStatus: failure.httpStatus,
-        firebaseStatus: failure.firebaseStatus,
-        firebaseCode: failure.firebaseCode,
-        firebaseMessage: failure.firebaseMessage,
-        firebaseDetails: failure.firebaseDetails,
-      });
+      if (!expectedHttpStatuses.includes(response.status)) {
+        this.logger.error({
+          event: "firebase.request_failed",
+          httpStatus: failure.httpStatus,
+          firebaseStatus: failure.firebaseStatus,
+          firebaseCode: failure.firebaseCode,
+          firebaseMessage: failure.firebaseMessage,
+          firebaseDetails: failure.firebaseDetails,
+        });
+      }
       throw new FirestoreRequestError(
         failure.httpStatus,
         failure.firebaseStatus,
@@ -183,7 +185,7 @@ export class FirebaseService {
     return token.access_token;
   }
 
-  async firestoreRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  async firestoreRequest<T>(path: string, init?: RequestInit, expectedHttpStatuses: readonly number[] = []): Promise<T> {
     const emulator = this.config.get<string>("FIRESTORE_EMULATOR_HOST");
     const base = emulator
       ? `http://${emulator}/v1`
@@ -220,6 +222,7 @@ export class FirebaseService {
           ...init?.headers,
         },
       },
+      expectedHttpStatuses,
     );
   }
 
@@ -456,6 +459,17 @@ export class FirebaseService {
         this.isFirebaseNotFound(error)
       )
         return undefined;
+      throw error;
+    }
+  }
+
+  /** Read a document whose absence is an expected result, without error-level logging. */
+  async findDocument(path: string): Promise<Record<string, unknown> | null> {
+    try {
+      const document = await this.firestoreRequest<FirestoreDocument>(path, { method: "GET" }, [404]);
+      return this.decodeFields(document.fields ?? {});
+    } catch (error: unknown) {
+      if (error instanceof FirestoreRequestError && this.isFirebaseNotFound(error)) return null;
       throw error;
     }
   }
