@@ -24,8 +24,51 @@ describe("ThemesService", () => {
     await expect(service.list(identity, { limit: 20, sort: "updatedAt", direction: "desc" })).resolves.toEqual({
       items: [{ id: "theme-1", organizationId: "org-1" }],
       nextCursor: null,
+      previousCursor: null,
+      total: 1,
     });
     expect(firebase.queryDocuments).toHaveBeenCalledWith("themes", "organizationId", "org-1", "updatedAt", "desc", 20);
+  });
+
+  it("returns an iterable cursor page for an organization with no themes", async () => {
+    const firebase = {
+      getDocument: jest.fn((path: string) => Promise.resolve(
+        path === "users/user-1" ? { activeOrganizationId: "org-1" }
+          : path === "memberships/org-1_user-1" ? { status: "ACTIVE", permissions: ["themes.read"] }
+            : undefined,
+      )),
+      queryDocuments: jest.fn().mockResolvedValue([]),
+    } as unknown as FirebaseService;
+
+    await expect(new ThemesService(firebase, {} as ThemeGenerationService, {} as ThemeGenerationQueue).list(identity, {
+      limit: 20,
+      sort: "updatedAt",
+      direction: "desc",
+    })).resolves.toEqual({ items: [], nextCursor: null, previousCursor: null, total: 0 });
+  });
+
+  it("logs the database failure and returns a safe correlated list error", async () => {
+    const firebaseFailure = new ServiceUnavailableException({
+      code: "FIREBASE_ERROR",
+      message: "The query requires an index. Create it at https://console.firebase.google.com/secret-index-url",
+      firebaseStatus: "FAILED_PRECONDITION",
+    });
+    const firebase = {
+      getDocument: jest.fn((path: string) => Promise.resolve(
+        path === "users/user-1" ? { activeOrganizationId: "org-1" }
+          : path === "memberships/org-1_user-1" ? { status: "ACTIVE", permissions: ["themes.read"] }
+            : undefined,
+      )),
+      queryDocuments: jest.fn().mockRejectedValue(firebaseFailure),
+    } as unknown as FirebaseService;
+    const service = new ThemesService(firebase, {} as ThemeGenerationService, {} as ThemeGenerationQueue);
+
+    const error: unknown = await service.list(identity, { limit: 20, sort: "updatedAt", direction: "desc" }).catch((failure: unknown) => failure);
+    expect(error).toBeInstanceOf(ServiceUnavailableException);
+    expect((error as ServiceUnavailableException).getResponse()).toEqual(expect.objectContaining({
+      code: "theme_list_unavailable",
+      detail: "Themes are temporarily unavailable. Please retry shortly.",
+    }));
   });
 
   it("accepts and normalizes the theme workflow brief payload", async () => {
