@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ValidationPipe } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, ValidationPipe } from "@nestjs/common";
 import { FirebaseService } from "../src/database/firebase.service";
 import { OrganizationsService } from "../src/modules/organizations/organizations.service";
 import { CreateOrganizationDto } from "../src/modules/organizations/dto";
@@ -30,7 +30,7 @@ describe("OrganizationsService", () => {
   const activeDocuments = (brandKit?: Record<string, unknown>, logoAsset?: Record<string, unknown>) => jest.fn((path: string) => {
     let value: Record<string, unknown> | undefined;
     if (path === "users/firebase-user") value = { activeOrganizationId: "org-1" };
-    if (path === "memberships/org-1_firebase-user") value = { status: "ACTIVE", permissions: ["organizations.read", "settings.manage"] };
+    if (path === "memberships/org-1_firebase-user") value = { organizationId: "org-1", userId: "firebase-user", status: "ACTIVE", permissions: ["organizations.read", "brandKit.write"] };
     if (path === "organizations/org-1") value = { id: "org-1", name: "Grace Church" };
     if (path === "brandKits/org-1") value = brandKit;
     if (path.startsWith("mediaAssets/")) value = logoAsset;
@@ -47,9 +47,39 @@ describe("OrganizationsService", () => {
     await expect(new OrganizationsService(firebase).brandKit(identity)).resolves.toBeNull();
   });
 
+  it("rejects a member without brand kit read permission", async () => {
+    const documents = activeDocuments();
+    const firebase = firebaseMock({ getDocument: jest.fn(async (path: string) => path === "memberships/org-1_firebase-user" ? { organizationId: "org-1", userId: "firebase-user", status: "ACTIVE", permissions: [] } : documents(path)) });
+    await expect(new OrganizationsService(firebase).brandKit(identity)).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it("rejects an inactive membership", async () => {
+    const documents = activeDocuments();
+    const firebase = firebaseMock({ getDocument: jest.fn(async (path: string) => path === "memberships/org-1_firebase-user" ? { organizationId: "org-1", userId: "firebase-user", status: "INACTIVE", permissions: ["organizations.read"] } : documents(path)) });
+    await expect(new OrganizationsService(firebase).brandKit(identity)).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it("resolves a Firebase UID to the internal membership user ID", async () => {
+    const getDocument = jest.fn((path: string) => Promise.resolve(path === "organizations/org-1" ? { id: "org-1" } : path === "brandKits/org-1" ? undefined : undefined));
+    const queryDocuments = jest.fn((collection: string) => Promise.resolve(collection === "users"
+      ? [{ id: "internal-user", firebaseUid: "firebase-user", defaultOrganizationId: "org-1" }]
+      : [{ id: "membership-1", organizationId: "org-1", userId: "internal-user", status: "ACTIVE", permissions: ["organizations.read"] }]));
+    const firebase = firebaseMock({ getDocument, queryDocuments });
+    await expect(new OrganizationsService(firebase).brandKit(identity)).resolves.toBeNull();
+    expect(getDocument).toHaveBeenCalledWith("memberships/org-1_internal-user");
+    expect(queryDocuments).toHaveBeenCalledWith("memberships", "userId", "internal-user", "userId", "asc", 100);
+  });
+
   it("rejects a logo media asset owned by another tenant", async () => {
     const firebase = firebaseMock({ getDocument: activeDocuments(undefined, { id: "logo-2", organizationId: "org-2" }) });
     await expect(new OrganizationsService(firebase).patchBrandKit(identity, { logoAssetId: "logo-2" })).rejects.toBeInstanceOf(BadRequestException);
+    expect(firebase.putDocument).not.toHaveBeenCalled();
+  });
+
+  it("requires the separate brand kit write permission for updates", async () => {
+    const documents = activeDocuments();
+    const firebase = firebaseMock({ getDocument: jest.fn(async (path: string) => path === "memberships/org-1_firebase-user" ? { organizationId: "org-1", userId: "firebase-user", status: "ACTIVE", permissions: ["organizations.read"] } : documents(path)) });
+    await expect(new OrganizationsService(firebase).patchBrandKit(identity, { colorPalette: ["#112233"] })).rejects.toBeInstanceOf(ForbiddenException);
     expect(firebase.putDocument).not.toHaveBeenCalled();
   });
 
