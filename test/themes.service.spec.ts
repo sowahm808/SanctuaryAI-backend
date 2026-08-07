@@ -1,4 +1,5 @@
 import { FirebaseService } from "../src/database/firebase.service";
+import { FirestoreRequestError } from "../src/database/firestore-request.error";
 import { ServiceUnavailableException } from "@nestjs/common";
 import { ThemesService } from "../src/modules/themes/themes.service";
 import { ThemeGenerationService } from "../src/modules/themes/theme-generation.service";
@@ -17,7 +18,7 @@ describe("ThemesService", () => {
           : path === "memberships/org-1_user-1" ? { status: "ACTIVE", permissions: ["themes.read"] }
             : undefined,
       )),
-      queryDocuments: jest.fn().mockResolvedValue([{ id: "theme-1", organizationId: "org-1" }]),
+      queryDocumentsPage: jest.fn().mockResolvedValue({ items: [{ id: "theme-1", organizationId: "org-1" }], nextCursor: null, previousCursor: null, total: 1 }),
     } as unknown as FirebaseService;
     const service = new ThemesService(firebase, { generate: jest.fn() } as unknown as ThemeGenerationService, { publish: jest.fn() } as unknown as ThemeGenerationQueue);
 
@@ -27,7 +28,7 @@ describe("ThemesService", () => {
       previousCursor: null,
       total: 1,
     });
-    expect(firebase.queryDocuments).toHaveBeenCalledWith("themes", "organizationId", "org-1", "updatedAt", "desc", 20);
+    expect(firebase.queryDocumentsPage).toHaveBeenCalledWith("themes", "organizationId", "org-1", "updatedAt", "desc", 20, undefined);
   });
 
   it("returns an iterable cursor page for an organization with no themes", async () => {
@@ -37,7 +38,7 @@ describe("ThemesService", () => {
           : path === "memberships/org-1_user-1" ? { status: "ACTIVE", permissions: ["themes.read"] }
             : undefined,
       )),
-      queryDocuments: jest.fn().mockResolvedValue([]),
+      queryDocumentsPage: jest.fn().mockResolvedValue({ items: [], nextCursor: null, previousCursor: null, total: 0 }),
     } as unknown as FirebaseService;
 
     await expect(new ThemesService(firebase, {} as ThemeGenerationService, {} as ThemeGenerationQueue).list(identity, {
@@ -48,26 +49,22 @@ describe("ThemesService", () => {
   });
 
   it("logs the database failure and returns a safe correlated list error", async () => {
-    const firebaseFailure = new ServiceUnavailableException({
-      code: "FIREBASE_ERROR",
-      message: "The query requires an index. Create it at https://console.firebase.google.com/secret-index-url",
-      firebaseStatus: "FAILED_PRECONDITION",
-    });
+    const firebaseFailure = new FirestoreRequestError(400, "FAILED_PRECONDITION", 400, "The query requires an index. Create it at https://console.firebase.google.com/secret-index-url");
     const firebase = {
       getDocument: jest.fn((path: string) => Promise.resolve(
         path === "users/user-1" ? { activeOrganizationId: "org-1" }
           : path === "memberships/org-1_user-1" ? { status: "ACTIVE", permissions: ["themes.read"] }
             : undefined,
       )),
-      queryDocuments: jest.fn().mockRejectedValue(firebaseFailure),
+      queryDocumentsPage: jest.fn().mockRejectedValue(firebaseFailure),
     } as unknown as FirebaseService;
     const service = new ThemesService(firebase, {} as ThemeGenerationService, {} as ThemeGenerationQueue);
 
     const error: unknown = await service.list(identity, { limit: 20, sort: "updatedAt", direction: "desc" }).catch((failure: unknown) => failure);
     expect(error).toBeInstanceOf(ServiceUnavailableException);
     expect((error as ServiceUnavailableException).getResponse()).toEqual(expect.objectContaining({
-      code: "theme_list_unavailable",
-      detail: "Themes are temporarily unavailable. Please retry shortly.",
+      code: "firestore_index_unavailable",
+      detail: "Themes are temporarily unavailable while database infrastructure is prepared.",
     }));
   });
 

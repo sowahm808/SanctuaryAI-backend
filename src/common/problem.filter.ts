@@ -7,15 +7,30 @@ import {
 } from "@nestjs/common";
 import type { Response } from "express";
 import { requestContext } from "./request-context";
+import { FirestoreRequestError } from "../database/firestore-request.error";
 @Catch()
 export class ProblemFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost) {
     const response = host.switchToHttp().getResponse<Response>();
-    const status =
+    const firestoreStatus = exception instanceof FirestoreRequestError
+      ? (["UNAVAILABLE", "DEADLINE_EXCEEDED"].includes(exception.firebaseStatus ?? "") ||
+          (exception.firebaseStatus === "FAILED_PRECONDITION" && /index/i.test(exception.message))
+          ? HttpStatus.SERVICE_UNAVAILABLE
+          : HttpStatus.INTERNAL_SERVER_ERROR)
+      : undefined;
+    const status = firestoreStatus ?? (
       exception instanceof HttpException
         ? exception.getStatus()
-        : HttpStatus.INTERNAL_SERVER_ERROR;
-    const value =
+        : HttpStatus.INTERNAL_SERVER_ERROR
+    );
+    const value = exception instanceof FirestoreRequestError
+      ? {
+          code: status === 503 ? "firestore_unavailable" : "firestore_request_failed",
+          message: status === 503
+            ? "The data service is temporarily unavailable."
+            : "The server generated an invalid data request.",
+        }
+      :
       exception instanceof HttpException
         ? exception.getResponse()
         : "An unexpected error occurred";

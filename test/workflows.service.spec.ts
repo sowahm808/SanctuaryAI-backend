@@ -20,6 +20,7 @@ function firebaseMock(membership: Record<string, unknown>): FirebaseService {
     ),
     putDocument: jest.fn().mockResolvedValue(undefined),
     queryDocuments: jest.fn().mockResolvedValue([]),
+    queryDocumentsPage: jest.fn().mockResolvedValue({ items: [], nextCursor: null, previousCursor: null, total: 0 }),
   } as unknown as FirebaseService;
 }
 

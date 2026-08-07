@@ -50,6 +50,7 @@ describe("ThemeGenerationQueue", () => {
     const promise = producer.publish(payload);
     await expect(promise).rejects.toBeInstanceOf(ServiceUnavailableException);
     await expect(promise).rejects.toMatchObject({ response: { code: "generation_queue_unavailable", detail: "Theme generation cannot be queued right now. Please retry shortly.", correlationId: "correlation-1", validation: [] } });
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     await expect(promise).rejects.not.toMatchObject({ response: expect.objectContaining({ detail: expect.stringContaining("WRONGPASS") }) });
   });
 
@@ -57,8 +58,11 @@ describe("ThemeGenerationQueue", () => {
     jest.useFakeTimers();
     const producer = new ThemeGenerationQueue({ waitUntilReady: jest.fn().mockResolvedValue(undefined), add: jest.fn(() => new Promise(() => undefined)) } as unknown as Queue<ThemeQueuePayload>);
     const promise = producer.publish(payload);
+    // Attach the rejection handler before advancing fake time. Otherwise Node
+    // can report the intentional timeout as an unhandled rejection first.
+    const rejection = expect(promise).rejects.toMatchObject({ response: { code: "generation_queue_unavailable", correlationId: "correlation-1" } });
     await jest.advanceTimersByTimeAsync(ThemeGenerationQueue.PUBLISH_TIMEOUT_MS);
-    await expect(promise).rejects.toMatchObject({ response: { code: "generation_queue_unavailable", correlationId: "correlation-1" } });
+    await rejection;
     expect(jest.getTimerCount()).toBe(0);
     jest.useRealTimers();
   });

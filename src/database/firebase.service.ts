@@ -1,7 +1,9 @@
 import {
   Injectable,
+  Logger,
   ServiceUnavailableException,
   UnauthorizedException,
+  UnprocessableEntityException,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import {
@@ -10,6 +12,8 @@ import {
   createVerify,
   randomUUID,
 } from "node:crypto";
+import { buildCollectionQuery, encodeCollectionCursor } from "./collection-query";
+import { FirestoreRequestError } from "./firestore-request.error";
 
 interface GoogleTokenResponse {
   access_token: string;
@@ -22,7 +26,7 @@ interface FirebaseRefreshResponse {
   user_id: string;
 }
 interface FirebaseError {
-  error?: { code?: number; message?: string; status?: string };
+  error?: { code?: number; message?: string; status?: string; details?: unknown };
 }
 interface FirebaseAuthResponse {
   idToken: string;
@@ -64,6 +68,7 @@ const encode = (value: string | Buffer): string =>
 
 @Injectable()
 export class FirebaseService {
+  private readonly logger = new Logger(FirebaseService.name);
   private accessToken?: { value: string; expiresAt: number };
   private certificates?: {
     values: Readonly<Record<string, string>>;
@@ -84,17 +89,52 @@ export class FirebaseService {
       ...init,
       signal: AbortSignal.timeout(10_000),
     });
-    const body = (await response.json()) as T & FirebaseError;
-    if (!response.ok) {
-      const message = body.error?.message ?? "Firebase request failed";
-      throw new ServiceUnavailableException({
-        code: "FIREBASE_ERROR",
-        message,
-        firebaseStatus: body.error?.status,
-        firebaseStatusCode: body.error?.code ?? response.status,
-      });
+    const raw = await response.text();
+    let body: unknown;
+    try {
+      body = raw ? JSON.parse(raw) : undefined;
+    } catch {
+      body = undefined;
     }
-    return body;
+    if (!response.ok) {
+      const provider = this.firebaseErrorEnvelope(body);
+      const failure = {
+        httpStatus: response.status,
+        firebaseStatus: provider?.status,
+        firebaseCode: provider?.code,
+        firebaseMessage: provider?.message ?? (raw.trim() || response.statusText || "Firebase request failed"),
+        firebaseDetails: provider?.details,
+        rawBody: raw,
+      };
+      this.logger.error({
+        event: "firebase.request_failed",
+        httpStatus: failure.httpStatus,
+        firebaseStatus: failure.firebaseStatus,
+        firebaseCode: failure.firebaseCode,
+        firebaseMessage: failure.firebaseMessage,
+        firebaseDetails: failure.firebaseDetails,
+      });
+      throw new FirestoreRequestError(
+        failure.httpStatus,
+        failure.firebaseStatus,
+        failure.firebaseCode,
+        failure.firebaseMessage,
+        failure.firebaseDetails,
+        failure.rawBody,
+      );
+    }
+    return body as T;
+  }
+
+  private firebaseErrorEnvelope(value: unknown): FirebaseError["error"] {
+    if (!this.isPlainObject(value) || !this.isPlainObject(value.error)) return undefined;
+    const error = value.error;
+    return {
+      code: typeof error.code === "number" ? error.code : undefined,
+      message: typeof error.message === "string" ? error.message : undefined,
+      status: typeof error.status === "string" ? error.status : undefined,
+      details: error.details,
+    };
   }
 
   private async serviceAccessToken(): Promise<string> {
@@ -152,6 +192,18 @@ export class FirebaseService {
     const url = path.startsWith(":")
       ? `${documentsUrl}${path}`
       : `${documentsUrl}/${path}`;
+    if (url.endsWith(":runQuery") && (this.config.get<string>("NODE_ENV") ?? process.env.NODE_ENV) !== "production") {
+      let structuredQueryBody: unknown = init?.body;
+      if (typeof init?.body === "string") {
+        try { structuredQueryBody = JSON.parse(init.body) as unknown; } catch { /* retain text for diagnostics */ }
+      }
+      this.logger.debug({
+        event: "firestore.request",
+        method: init?.method ?? "GET",
+        endpoint: url,
+        body: structuredQueryBody,
+      });
+    }
     return this.json<T>(
       url,
       {
@@ -376,7 +428,7 @@ export class FirebaseService {
       await this.firestoreRequest(`users/${identity.uid}`, { method: "GET" });
     } catch (error: unknown) {
       if (
-        error instanceof ServiceUnavailableException &&
+        error instanceof FirestoreRequestError &&
         this.isFirebaseNotFound(error)
       ) {
         await this.createUserProfile(identity, identity.name?.trim() || "User");
@@ -394,7 +446,7 @@ export class FirebaseService {
       return this.decodeFields(document.fields ?? {});
     } catch (error: unknown) {
       if (
-        error instanceof ServiceUnavailableException &&
+        error instanceof FirestoreRequestError &&
         this.isFirebaseNotFound(error)
       )
         return undefined;
@@ -417,10 +469,8 @@ export class FirebaseService {
         value: { stringValue: value },
       },
     };
-    let results: FirestoreQueryResult[];
-    try {
-      results = await this.runQuery({
-        from: [{ collectionId: collection }],
+    const results = await this.runCollectionQuery(collection, {
+        from: [{ collectionId: collection.split("/").at(-1)! }],
         where,
         orderBy: [{
           field: { fieldPath: sort },
@@ -428,26 +478,47 @@ export class FirebaseService {
         }],
         limit,
       });
-    } catch (error: unknown) {
-      if (!this.isMissingFirestoreIndex(error)) throw error;
-
-      // Keep collection pages available while a newly declared composite index
-      // is still being deployed. An equality-only query uses Firestore's
-      // built-in single-field index, so ordering can safely be completed here.
-      results = await this.runQuery({ from: [{ collectionId: collection }], where });
-      return this.decodeQueryResults(results)
-        .filter((document) => document[sort] !== undefined && document[sort] !== null)
-        .sort((left, right) => {
-          const comparison = String(left[sort]).localeCompare(String(right[sort]));
-          return direction === "asc" ? comparison : -comparison;
-        })
-        .slice(0, limit);
-    }
     return this.decodeQueryResults(results);
+  }
+
+  async queryDocumentsPage(
+    collection: string,
+    field: string,
+    value: string,
+    sort: string,
+    direction: "asc" | "desc",
+    limit: number,
+    cursor?: string,
+    filters: Readonly<Record<string, string>> = {},
+  ): Promise<{ items: Record<string, unknown>[]; nextCursor: string | null; previousCursor: null; total: number }> {
+    const structuredQuery = buildCollectionQuery({ collection, organizationId: value, sort, direction, limit, cursor, filters, projectId: this.projectId });
+    const decoded = this.decodeQueryResults(await this.runQuery(structuredQuery));
+    const hasMore = decoded.length > limit;
+    const items = decoded.slice(0, limit);
+    const last = items.at(-1), lastValue = last?.[sort], lastId = last?.id;
+    const cursorValue = lastValue instanceof Date ? lastValue.toISOString() : lastValue;
+    const nextCursor = hasMore && typeof cursorValue === "string" && typeof lastId === "string"
+      ? encodeCollectionCursor({ value: cursorValue, id: lastId })
+      : null;
+    return { items, nextCursor, previousCursor: null, total: items.length };
   }
 
   private runQuery(structuredQuery: Record<string, unknown>): Promise<FirestoreQueryResult[]> {
     return this.firestoreRequest<FirestoreQueryResult[]>(":runQuery", {
+      method: "POST",
+      body: JSON.stringify({ structuredQuery }),
+    });
+  }
+
+  private runCollectionQuery(collection: string, structuredQuery: Record<string, unknown>): Promise<FirestoreQueryResult[]> {
+    const segments = collection.split("/").filter(Boolean);
+    if (segments.length === 1) return this.runQuery(structuredQuery);
+    if (segments.length % 2 === 0) throw new UnprocessableEntityException({ code: "invalid_collection_path", message: "The collection path is invalid." });
+    // The parent is part of the runQuery resource name, not a request-body
+    // property. Google rejects an otherwise valid StructuredQuery when a
+    // `parent` sibling is included in the JSON payload.
+    const parentPath = segments.slice(0, -1).join("/");
+    return this.firestoreRequest<FirestoreQueryResult[]>(`${parentPath}:runQuery`, {
       method: "POST",
       body: JSON.stringify({ structuredQuery }),
     });
@@ -462,16 +533,6 @@ export class FirebaseService {
     });
   }
 
-  private isMissingFirestoreIndex(error: unknown): boolean {
-    if (!(error instanceof ServiceUnavailableException)) return false;
-    const response = error.getResponse();
-    if (typeof response === "string") return false;
-    const firebaseError = response as { firebaseStatus?: unknown; message?: unknown };
-    return firebaseError.firebaseStatus === "FAILED_PRECONDITION" &&
-      typeof firebaseError.message === "string" &&
-      firebaseError.message.toLowerCase().includes("index");
-  }
-
   async putDocument(path: string, fields: Record<string, unknown>): Promise<void> {
     await this.firestoreRequest(path, {
       method: "PATCH",
@@ -484,7 +545,7 @@ export class FirebaseService {
       await this.firestoreRequest(path, { method: "DELETE" });
     } catch (error: unknown) {
       if (
-        error instanceof ServiceUnavailableException &&
+        error instanceof FirestoreRequestError &&
         this.isFirebaseNotFound(error)
       )
         return;
@@ -507,12 +568,24 @@ export class FirebaseService {
     if (Array.isArray(value)) {
       return { arrayValue: { values: value.map((item) => this.encodeValue(item)) } };
     }
-    if (typeof value === "object") {
-      return { mapValue: { fields: this.encodeFields(value as Record<string, unknown>) } };
+    if (value instanceof Date) {
+      if (Number.isNaN(value.getTime())) {
+        throw new TypeError("Cannot encode invalid Date as Firestore timestamp");
+      }
+      return { timestampValue: value.toISOString() };
+    }
+    if (this.isPlainObject(value)) {
+      return { mapValue: { fields: this.encodeFields(value) } };
     }
     if (typeof value === "string") return { stringValue: value };
-    if (typeof value === "bigint" || typeof value === "symbol") return { stringValue: value.toString() };
-    return { stringValue: "" };
+    if (typeof value === "bigint") return { integerValue: String(value) };
+    throw new TypeError(`Cannot encode unsupported Firestore value of type ${typeof value}`);
+  }
+
+  private isPlainObject(value: unknown): value is Record<string, unknown> {
+    if (typeof value !== "object" || value === null) return false;
+    const prototype = Object.getPrototypeOf(value) as unknown;
+    return prototype === Object.prototype || prototype === null;
   }
 
   private decodeFields(fields: Record<string, FirestoreValue>): Record<string, unknown> {
@@ -524,7 +597,13 @@ export class FirebaseService {
   private decodeValue(value: FirestoreValue): unknown {
     if ("stringValue" in value) return value.stringValue;
     if ("booleanValue" in value) return value.booleanValue;
-    if ("timestampValue" in value) return value.timestampValue;
+    if ("timestampValue" in value) {
+      const timestamp = new Date(value.timestampValue);
+      if (Number.isNaN(timestamp.getTime())) {
+        throw new TypeError(`Cannot decode invalid Firestore timestamp: ${value.timestampValue}`);
+      }
+      return timestamp;
+    }
     if ("integerValue" in value) return Number(value.integerValue);
     if ("doubleValue" in value) return value.doubleValue;
     if ("nullValue" in value) return null;
@@ -537,7 +616,7 @@ export class FirebaseService {
       method: "GET",
     }).catch((error: unknown) => {
       if (
-        error instanceof ServiceUnavailableException &&
+        error instanceof FirestoreRequestError &&
         this.isFirebaseNotFound(error)
       )
         return;
@@ -545,17 +624,7 @@ export class FirebaseService {
     });
   }
 
-  private isFirebaseNotFound(error: ServiceUnavailableException): boolean {
-    const response = error.getResponse();
-    if (typeof response === "string") return false;
-
-    const details = response as {
-      firebaseStatus?: unknown;
-      firebaseStatusCode?: unknown;
-    };
-    return (
-      details.firebaseStatus === "NOT_FOUND" ||
-      details.firebaseStatusCode === 404
-    );
+  private isFirebaseNotFound(error: FirestoreRequestError): boolean {
+    return error.firebaseStatus === "NOT_FOUND" || error.httpStatus === 404;
   }
 }
