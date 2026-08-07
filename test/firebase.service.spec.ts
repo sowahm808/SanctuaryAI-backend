@@ -250,6 +250,23 @@ describe("FirebaseService authentication emulator support", () => {
     });
   });
 
+  it("parses Firestore's array-wrapped runQuery error envelope", async () => {
+    const body = [{ error: {
+      code: 400,
+      status: "FAILED_PRECONDITION",
+      message: "The query requires an index. Create it in the Firebase console.",
+    } }];
+    jest.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify(body), { status: 400 }));
+    const service = new FirebaseService(config({ ...values, FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080" }));
+
+    await expect(service.firestoreRequest(":runQuery", { method: "POST", body: "{}" })).rejects.toMatchObject({
+      httpStatus: 400,
+      firebaseCode: 400,
+      firebaseStatus: "FAILED_PRECONDITION",
+      firebaseMessage: "The query requires an index. Create it in the Firebase console.",
+    });
+  });
+
   it.each([
     ["INVALID_ARGUMENT", "example"],
     ["FAILED_PRECONDITION", "query requires an index"],
