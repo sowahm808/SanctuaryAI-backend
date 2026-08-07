@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { FirebaseIdentity, FirebaseService } from "../../database/firebase.service";
 import { requestContext } from "../../common/request-context";
@@ -11,6 +11,8 @@ export interface CreatedOrganizationResult { organization: RecordValue & { id: s
 
 @Injectable()
 export class OrganizationsService {
+  private readonly logger = new Logger(OrganizationsService.name);
+
   constructor(private readonly firebase: FirebaseService) {}
 
   async create(user: FirebaseIdentity, dto: CreateOrganizationDto): Promise<CreatedOrganizationResult> {
@@ -20,7 +22,7 @@ export class OrganizationsService {
     return this.createOrganization(user, dto, existingUser, false);
   }
 
-  async current(user: FirebaseIdentity): Promise<RecordValue> { const { organization } = await this.active(user, "settings.manage"); return this.profile(organization); }
+  async current(user: FirebaseIdentity): Promise<RecordValue> { const { organization } = await this.active(user, "organizations.read"); return this.profile(organization); }
 
   async patchCurrent(user: FirebaseIdentity, dto: PatchOrganizationDto): Promise<RecordValue> {
     const { organization, organizationId } = await this.active(user, "settings.manage");
@@ -40,7 +42,7 @@ export class OrganizationsService {
   }
 
   async patchBrandKit(user: FirebaseIdentity, dto: UpdateBrandKitDto): Promise<RecordValue> {
-    const { organizationId } = await this.active(user, "settings.manage");
+    const { organizationId } = await this.active(user, "brandKit.write");
     if (dto.logoAssetId) {
       const asset = await this.firebase.getDocument(`mediaAssets/${dto.logoAssetId}`);
       if (!asset || this.stringValue(asset.organizationId) !== organizationId) {
@@ -98,7 +100,43 @@ export class OrganizationsService {
   }
 
   private join(user: FirebaseIdentity, dto: CreateOrganizationDto): Promise<CreatedOrganizationResult> { void user; if (!dto.invitationCode?.trim()) throw new BadRequestException({ code: "invitation_code_required", message: "Invitation code is required to join an organization." }); return Promise.reject(new NotFoundException({ code: "invitation_not_found", message: "The invitation code is invalid or expired." })); }
-  private async active(user: FirebaseIdentity, permission: string) { const userDoc = await this.firebase.getDocument(`users/${user.uid}`); const organizationId = this.stringValue(userDoc?.activeOrganizationId); const membership = organizationId ? await this.firebase.getDocument(`memberships/${organizationId}_${user.uid}`) : undefined; if (!organizationId || membership?.status !== "ACTIVE" || !this.stringArray(membership.permissions).includes(permission)) throw new ForbiddenException({ code: "organization_permission_missing", message: "An active organization membership with permission is required." }); const organization = await this.firebase.getDocument(`organizations/${organizationId}`); if (!organization) throw new NotFoundException({ code: "organization_not_found", message: "The active organization no longer exists." }); return { organizationId, organization, membership }; }
+  private async active(user: FirebaseIdentity, permission: string) {
+    const { userId, userDoc } = await this.resolveInternalUser(user.uid);
+    const organizationId = this.stringValue(userDoc?.activeOrganizationId) || this.stringValue(userDoc?.defaultOrganizationId);
+    if (!organizationId) {
+      this.logAccessDenied(userId, undefined, permission, undefined);
+      throw new ForbiddenException({ code: "organization_context_missing", message: "Select an active organization before accessing this resource." });
+    }
+
+    const membership = await this.resolveMembership(organizationId, userId);
+    const membershipStatus = this.stringValue(membership?.status);
+    if (membershipStatus !== "ACTIVE" || !this.stringArray(membership?.permissions).includes(permission)) {
+      this.logAccessDenied(userId, organizationId, permission, membershipStatus || undefined);
+      throw new ForbiddenException({ code: "organization_permission_missing", message: "An active organization membership with permission is required." });
+    }
+    const organization = await this.firebase.getDocument(`organizations/${organizationId}`);
+    if (!organization) throw new NotFoundException({ code: "organization_not_found", message: "The active organization no longer exists." });
+    return { organizationId, organization, membership };
+  }
+
+  private async resolveInternalUser(firebaseUid: string): Promise<{ userId: string; userDoc: RecordValue | undefined }> {
+    const direct = await this.firebase.getDocument(`users/${firebaseUid}`);
+    if (direct) return { userId: this.stringValue(direct.id) || firebaseUid, userDoc: direct };
+    const [matched] = await this.firebase.queryDocuments("users", "firebaseUid", firebaseUid, "firebaseUid", "asc", 1);
+    return { userId: this.stringValue(matched?.id) || firebaseUid, userDoc: matched };
+  }
+
+  private async resolveMembership(organizationId: string, userId: string): Promise<RecordValue | undefined> {
+    const direct = await this.firebase.getDocument(`memberships/${organizationId}_${userId}`);
+    if (direct && this.stringValue(direct.organizationId || organizationId) === organizationId && this.stringValue(direct.userId || userId) === userId) return direct;
+    const candidates = await this.firebase.queryDocuments("memberships", "userId", userId, "userId", "asc", 100);
+    return candidates.find((membership) => this.stringValue(membership.organizationId) === organizationId);
+  }
+
+  private logAccessDenied(userId: string, organizationId: string | undefined, requiredPermission: string, membershipStatus: string | undefined): void {
+    if (process.env.NODE_ENV === "production") return;
+    this.logger.warn({ event: "brand_kit.access_denied", userId, organizationId, requiredPermission, membershipStatus });
+  }
   private profileFields(dto: Partial<CreateOrganizationDto>) {
     const keys = ["slogan","description","seniorPastor","primaryColor","secondaryColor","headingFont","bodyFont","primaryLogo","secondaryLogo","contact","socialChannels","serviceDays","serviceTimes","bibleTranslation","ministryTone","statementOfFaith","doctrinalGuidelines","prohibitedContent","defaultHashtags","defaultFooter","teamInvitations","socialConnectionNotes","firstCampaignChoice"] as const;
     const fields = Object.fromEntries(keys.filter((key) => dto[key] !== undefined).map((key) => [key, typeof dto[key] === "string" ? this.stringValue(dto[key]) : dto[key]]));
