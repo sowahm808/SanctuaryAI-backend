@@ -28,6 +28,21 @@ export class ApprovalWorkflowService {
     const now = new Date().toISOString(), id = randomUUID();
     const approval = { id, organizationId, resourceType, resourceId, contentType: resourceType, contentId: resourceId, versionId, revision, status: "pending", requestedByUserId: user.uid, requestedBy: user.uid, reviewerUserId: reviewerUserId || undefined, submittedAt: now, createdAt: now, updatedAt: now, comments: [] };
     await this.firebase.putDocument(`approvals/${id}`, approval);
+    if (reviewerUserId) {
+      const notificationId = randomUUID();
+      await this.firebase.putDocument(`notifications/${notificationId}`, {
+        id: notificationId,
+        organizationId,
+        userId: reviewerUserId,
+        type: "approval_requested",
+        status: "unread",
+        resourceType,
+        resourceId,
+        approvalId: id,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
     return this.view(approval);
   }
 
