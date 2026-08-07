@@ -146,4 +146,43 @@ describe("WorkflowsService", () => {
     await expect(workflowsService(firebase).list(identity, "users"))
       .resolves.toEqual({ items: [], nextCursor: null, previousCursor: null, total: 0 });
   });
+
+  it("returns hydrated unassigned and assigned-to-me actionable approvals", async () => {
+    const firebase = firebaseMock({ status: "ACTIVE", permissions: ["approvals.review"] });
+    (firebase.queryDocumentsPage as jest.Mock).mockResolvedValue({
+      items: [
+        { id: "a-1", organizationId: "org-1", contentType: "prayers", contentId: "p-1", status: "PENDING_APPROVAL", requestedBy: "author-1", versionId: "v-1", revision: "3", updatedAt: "2026-01-01" },
+        { id: "a-2", organizationId: "org-1", resourceType: "declarations", resourceId: "d-1", status: "in_review", requestedByUserId: "author-1", reviewerUserId: "user-1", versionId: "v-2", revision: "2", updatedAt: "2026-01-02" },
+        { id: "a-3", organizationId: "org-1", resourceType: "prayers", resourceId: "p-2", status: "APPROVED", requestedByUserId: "author-1", updatedAt: "2026-01-03" },
+      ], nextCursor: null, previousCursor: null, total: 3,
+    });
+    (firebase.getDocument as jest.Mock).mockImplementation((path: string) => Promise.resolve(
+      path === "users/user-1" ? { id: "user-1", activeOrganizationId: "org-1" }
+        : path === "users/author-1" ? { displayName: "Michael Author" }
+          : path === "memberships/org-1_user-1" ? { status: "ACTIVE", permissions: ["approvals.review"] }
+            : path === "prayers/p-1" ? { id: "p-1", title: "Morning Prayer", currentVersionId: "v-1", versions: [{ id: "v-1", snapshot: { title: "Morning Prayer", prayerPoints: ["Grace"] } }] }
+              : path === "declarations/d-1" ? { id: "d-1", title: "August Declaration", currentVersionId: "v-2", versions: [{ id: "v-2", snapshot: { declaration: "I will flourish" } }] }
+                : undefined,
+    ));
+
+    const result = await workflowsService(firebase).list(identity, "approvals", { limit: 20, sort: "updatedAt", direction: "desc", filter: {} });
+
+    expect(result.items).toHaveLength(2);
+    expect(result.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "a-1", title: "Morning Prayer", status: "pending", requestedByName: "Michael Author", preview: { title: "Morning Prayer", prayerPoints: ["Grace"] } }),
+      expect.objectContaining({ id: "a-2", title: "August Declaration", status: "in_review", reviewerUserId: "user-1" }),
+    ]));
+  });
+
+  it("applies real assignee filters without hiding unassigned approvals by default", async () => {
+    const firebase = firebaseMock({ status: "ACTIVE", permissions: ["approvals.review"] });
+    (firebase.queryDocumentsPage as jest.Mock).mockResolvedValue({ items: [
+      { id: "mine", organizationId: "org-1", resourceType: "prayers", resourceId: "p-1", status: "pending", reviewerUserId: "user-1", updatedAt: "1" },
+      { id: "open", organizationId: "org-1", resourceType: "prayers", resourceId: "p-2", status: "pending", updatedAt: "2" },
+      { id: "other", organizationId: "org-1", resourceType: "prayers", resourceId: "p-3", status: "pending", reviewerUserId: "user-2", updatedAt: "3" },
+    ], nextCursor: null, previousCursor: null, total: 3 });
+    const service = workflowsService(firebase);
+    await expect(service.list(identity, "approvals", { limit: 20, sort: "updatedAt", direction: "desc", filter: { assigneeId: "me" } })).resolves.toEqual(expect.objectContaining({ items: [expect.objectContaining({ id: "mine" })] }));
+    await expect(service.list(identity, "approvals", { limit: 20, sort: "updatedAt", direction: "desc", filter: { assigneeId: "unassigned" } })).resolves.toEqual(expect.objectContaining({ items: [expect.objectContaining({ id: "open" })] }));
+  });
 });

@@ -77,6 +77,8 @@ export class WorkflowsController {
   approval(@CurrentUser() user: FirebaseIdentity, @Param("area", workflowAreaPipe) area: WorkflowArea, @Param("id") id: string) { return this.workflows.approval(user, area, id); }
   @Post(":area/:id/comments")
   comment(@CurrentUser() user: FirebaseIdentity, @Param("area", workflowAreaPipe) area: WorkflowArea, @Param("id") id: string, @Body() body: R) { return this.workflows.comment(user, area, id, body); }
+  @Post("approvals/:id/assign")
+  assignApproval(@CurrentUser() user: FirebaseIdentity, @Param("id") id: string, @Body() body: R) { return this.workflows.assignApproval(user, id, body); }
   @Post(":area/:id/exports")
   export(@CurrentUser() user: FirebaseIdentity, @Param("area", workflowExportAreaPipe) area: WorkflowExportArea, @Param("id") id: string, @Body() body: R) { return this.workflows.exportJob(user, area, id, body); }
   @Post(":area/:id/generate")
