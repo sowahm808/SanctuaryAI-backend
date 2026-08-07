@@ -18,6 +18,7 @@ const CONFIG: Record<string, { collection: string; create: string; read: string;
   approvals: { collection: "approvals", create: "reviews.create", read: "reviews.read", update: "reviews.update", approve: "reviews.approve" },
   reviews: { collection: "reviewItems", create: "reviews.create", read: "reviews.read", update: "reviews.update", approve: "reviews.approve" },
   notifications: { collection: "notifications", create: "notifications.manage", read: "notifications.read", update: "notifications.manage" },
+  users: { collection: "users", create: "users.manage", read: "team.read", update: "users.manage" },
   team: { collection: "teamMembers", create: "team.manage", read: "team.read", update: "team.manage" },
   subscriptions: { collection: "subscriptions", create: "subscription.manage", read: "subscription.read", update: "subscription.manage" },
   audit: { collection: "auditExports", create: "audit.export", read: "audit.read", update: "audit.export", exportType: "audit_export" },
