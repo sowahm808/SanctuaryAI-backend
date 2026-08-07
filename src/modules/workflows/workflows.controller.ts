@@ -19,6 +19,7 @@ enum WorkflowArea {
   Approvals = "approvals",
   Reviews = "reviews",
   Notifications = "notifications",
+  Users = "users",
   Team = "team",
   Subscriptions = "subscriptions",
   Audit = "audit",

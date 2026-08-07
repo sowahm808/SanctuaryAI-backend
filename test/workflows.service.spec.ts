@@ -96,4 +96,11 @@ describe("WorkflowsService", () => {
       .resolves.toEqual(expect.objectContaining({ id: "approval-1", status: "pending" }));
     expect(firebase.getDocument).toHaveBeenCalledWith("approvals/approval-1");
   });
+
+  it("accepts users as a workflow list area for reviewer selectors", async () => {
+    const firebase = firebaseMock({ status: "ACTIVE", permissions: ["team.read"] });
+
+    await expect(new WorkflowsService(firebase).list(identity, "users"))
+      .resolves.toEqual({ items: [], nextCursor: null, organizationId: "org-1" });
+  });
 });
