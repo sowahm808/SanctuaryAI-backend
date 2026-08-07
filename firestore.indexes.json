@@ -406,23 +406,23 @@
       ]
     },
     {
-  "collectionGroup": "mediaAssets",
-  "queryScope": "COLLECTION",
-  "fields": [
-    {
-      "fieldPath": "organizationId",
-      "order": "ASCENDING"
+      "collectionGroup": "mediaAssets",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "organizationId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "DESCENDING"
+        }
+      ]
     },
-    {
-      "fieldPath": "updatedAt",
-      "order": "DESCENDING"
-    },
-    {
-      "fieldPath": "__name__",
-      "order": "DESCENDING"
-    }
-  ]
-},
     {
       "collectionGroup": "flyerProjects",
       "queryScope": "COLLECTION",

@@ -1,4 +1,4 @@
-import { ConflictException, ValidationPipe } from "@nestjs/common";
+import { BadRequestException, ConflictException, ValidationPipe } from "@nestjs/common";
 import { FirebaseService } from "../src/database/firebase.service";
 import { OrganizationsService } from "../src/modules/organizations/organizations.service";
 import { CreateOrganizationDto } from "../src/modules/organizations/dto";
@@ -27,6 +27,32 @@ function firebaseMock(overrides: Partial<FirebaseService> = {}): FirebaseService
 }
 
 describe("OrganizationsService", () => {
+  const activeDocuments = (brandKit?: Record<string, unknown>, logoAsset?: Record<string, unknown>) => jest.fn((path: string) => {
+    let value: Record<string, unknown> | undefined;
+    if (path === "users/firebase-user") value = { activeOrganizationId: "org-1" };
+    if (path === "memberships/org-1_firebase-user") value = { status: "ACTIVE", permissions: ["organizations.read", "settings.manage"] };
+    if (path === "organizations/org-1") value = { id: "org-1", name: "Grace Church" };
+    if (path === "brandKits/org-1") value = brandKit;
+    if (path.startsWith("mediaAssets/")) value = logoAsset;
+    return Promise.resolve(value);
+  });
+
+  it("returns the active organization's brand kit", async () => {
+    const firebase = firebaseMock({ getDocument: activeDocuments({ id: "kit-1", organizationId: "org-1", logoAssetId: "logo-1", colorPalette: ["#112233"], fontFamilies: ["Inter"] }) });
+    await expect(new OrganizationsService(firebase).brandKit(identity)).resolves.toEqual({ id: "kit-1", organizationId: "org-1", logoAssetId: "logo-1", colorPalette: ["#112233"], fontFamilies: ["Inter"] });
+  });
+
+  it("returns null when the active organization has no brand kit", async () => {
+    const firebase = firebaseMock({ getDocument: activeDocuments() });
+    await expect(new OrganizationsService(firebase).brandKit(identity)).resolves.toBeNull();
+  });
+
+  it("rejects a logo media asset owned by another tenant", async () => {
+    const firebase = firebaseMock({ getDocument: activeDocuments(undefined, { id: "logo-2", organizationId: "org-2" }) });
+    await expect(new OrganizationsService(firebase).patchBrandKit(identity, { logoAssetId: "logo-2" })).rejects.toBeInstanceOf(BadRequestException);
+    expect(firebase.putDocument).not.toHaveBeenCalled();
+  });
+
   it("accepts and normalizes the onboarding form payload", async () => {
     const payload = await new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }).transform({
       setupMode: "create", name: "Salvation Church", primaryLogo: "churchlogo.jpg", primaryLogoAlt: "Church logo",
