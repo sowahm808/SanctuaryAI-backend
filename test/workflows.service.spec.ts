@@ -19,6 +19,7 @@ function firebaseMock(membership: Record<string, unknown>): FirebaseService {
       ),
     ),
     putDocument: jest.fn().mockResolvedValue(undefined),
+    queryDocuments: jest.fn().mockResolvedValue([]),
   } as unknown as FirebaseService;
 }
 
@@ -49,7 +50,7 @@ describe("WorkflowsService", () => {
     expect(firebase.putDocument).toHaveBeenCalledWith(expect.stringMatching(/^prayers\//), expect.any(Object));
   });
 
-  it("queues prayer generation jobs with the current revision", async () => {
+  it("does not create an unprocessable queued prayer job", async () => {
     const firebase = firebaseMock({ status: "ACTIVE", permissions: ["prayers.write"] });
     (firebase.getDocument as jest.Mock).mockImplementation((path: string) =>
       Promise.resolve(
@@ -63,13 +64,9 @@ describe("WorkflowsService", () => {
       ),
     );
 
-    const result = await new WorkflowsService(firebase).generate(identity, "prayers", "prayer-1", {});
-
-    expect(result).toEqual(expect.objectContaining({ organizationId: "org-1", type: "prayers_generate", status: "queued", sourceRevision: "rev-1" }));
-    expect(firebase.putDocument).toHaveBeenCalledWith(expect.stringMatching(/^asyncJobs\//), expect.any(Object));
-    const putDocument = firebase.putDocument as jest.Mock<Promise<void>, [string, Record<string, unknown>]>;
-    const jobWrite = putDocument.mock.calls.find(([path]) => path.startsWith("asyncJobs/"));
-    expect(jobWrite?.[1]).toEqual(expect.objectContaining({ payload: { id: "prayer-1", sourceRevision: "rev-1" } }));
+    await expect(new WorkflowsService(firebase).generate(identity, "prayers", "prayer-1", {}))
+      .rejects.toMatchObject({ status: 501 });
+    expect(firebase.putDocument).not.toHaveBeenCalledWith(expect.stringMatching(/^asyncJobs\//), expect.any(Object));
   });
 
   it("still rejects active members without matching workflow permissions", async () => {
@@ -101,6 +98,6 @@ describe("WorkflowsService", () => {
     const firebase = firebaseMock({ status: "ACTIVE", permissions: ["team.read"] });
 
     await expect(new WorkflowsService(firebase).list(identity, "users"))
-      .resolves.toEqual({ items: [], nextCursor: null, organizationId: "org-1" });
+      .resolves.toEqual({ items: [], nextCursor: null, previousCursor: null, total: 0 });
   });
 });

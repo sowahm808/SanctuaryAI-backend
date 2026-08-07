@@ -2,7 +2,7 @@ import { ConflictException, ForbiddenException, Injectable, Logger, NotFoundExce
 import { createHash, randomUUID } from "node:crypto";
 import { requestContext } from "../../common/request-context";
 import { FirebaseIdentity, FirebaseService } from "../../database/firebase.service";
-import { ThemeActionDto, ThemeCommentDto, ThemeInputDto, ThemeListQueryDto, ThemeOutputDto, ThemePatchInputDto, ThemeRefineDto } from "./dto";
+import { ThemeActionDto, ThemeCommentDto, ThemeDraftUpdateDto, ThemeInputDto, ThemeListQueryDto, ThemeOutputDto, ThemePatchInputDto, ThemeRefineDto } from "./dto";
 import { ThemeGenerationService } from "./theme-generation.service";
 import { ThemeGenerationQueue } from "./theme-generation.queue";
 type R=Record<string,unknown>; const FIELDS=["title","subtitle","scriptures","explanation","pastoralIntroduction","objectives","weeklyDirection","confession","declaration","hashtags","flyerHeadline","designConcept"];
@@ -22,6 +22,7 @@ type R=Record<string,unknown>; const FIELDS=["title","subtitle","scriptures","ex
  }
  async create(user:FirebaseIdentity,dto:ThemeInputDto){const {organizationId}=await this.active(user,"themes.create"); const input=this.normalizeInput(dto); this.validateInput(input); const now=new Date().toISOString(), id=randomUUID(), revision=randomUUID(); const theme={id,organizationId,input,currentOutput:this.blank(),approvalState:"draft",comments:[],versions:[],locks:[],auditSummary:[],revision,createdBy:user.uid,createdAt:now,updatedAt:now}; await this.firebase.putDocument(`themes/${id}`,theme); await this.audit(user,organizationId,"theme.create",{themeId:id,revision}); return theme;}
  async get(user:FirebaseIdentity,id:string){return this.theme(user,id,"themes.read")}
+ async patchDraft(user:FirebaseIdentity,id:string,dto:ThemeDraftUpdateDto){const {expectedRevision,draft,...input}=dto; return this.patchInput(user,id,{...input,...(draft??{}),revision:expectedRevision});}
  async patchInput(user:FirebaseIdentity,id:string,dto:ThemePatchInputDto){const t=await this.theme(user,id,"themes.update"); if(this.s(t.revision)!==dto.revision) throw new ConflictException({code:"revision_conflict",message:"The theme is stale.",currentRevision:this.s(t.revision)}); this.validateInput(dto); const revision=randomUUID(), updated={...t,input:{...(t.input as R??{}),...dto},revision,updatedAt:new Date().toISOString()}; await this.firebase.putDocument(`themes/${id}`,updated); await this.audit(user,this.s(t.organizationId),"theme.input.save",{themeId:id,revision}); return updated;}
  async generate(user:FirebaseIdentity,id:string,body:Partial<ThemeRefineDto>={},idempotencyKey?:string){const t=await this.theme(user,id,"themes.update"); return this.queueGeneration(user,t,id,"theme_generate",body.sourceRevision??this.s(t.revision),body.targetFields??FIELDS,undefined,idempotencyKey);}
  async refine(user:FirebaseIdentity,id:string,dto:ThemeRefineDto,idempotencyKey?:string){const t=await this.theme(user,id,"themes.update"); return this.queueGeneration(user,t,id,"theme_refine",dto.sourceRevision??this.s(t.revision),dto.targetFields??FIELDS,dto.scope,idempotencyKey);}
