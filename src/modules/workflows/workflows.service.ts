@@ -5,6 +5,7 @@ import { FirebaseIdentity, FirebaseService } from "../../database/firebase.servi
 import { TenantRepository } from "../../database/tenant-repository";
 import { WorkflowListQueryDto, WorkflowMutationDto } from "./dto";
 import { ApprovalWorkflowService } from "./approval-workflow.service";
+import { ApprovalListResult, ApprovalPriority, ApprovalQueueItemDto, ApprovalStatus } from "./approval.types";
 
 type R = Record<string, unknown>;
 
@@ -27,6 +28,7 @@ const CONFIG: Record<string, { collection: string; create: string; read: string;
   audit: { collection: "auditExports", create: "audit.export", read: "audit.read", update: "audit.export", exportType: "audit_export" },
   analytics: { collection: "analyticsReports", create: "analytics.export", read: "analytics.read", update: "analytics.export", exportType: "analytics_export" },
 };
+const APPROVAL_RESOURCE_COLLECTIONS: Record<string, string> = { theme: "themes", themes: "themes", prayers: "prayers", prayer: "prayers", declarations: "declarations", declaration: "declarations", sermons: "sermons", sermon: "sermons", flyers: "flyerProjects", flyer: "flyerProjects", videos: "videoProjects", video: "videoProjects", publishing: "publishingItems", social: "publishingItems", social_post: "publishingItems" };
 
 @Injectable()
 export class WorkflowsService {
@@ -37,7 +39,7 @@ export class WorkflowsService {
   ) {}
 
   async list(user: FirebaseIdentity, area: string, query: WorkflowListQueryDto = new WorkflowListQueryDto()) {
-    const cfg = this.cfg(area); const { organizationId } = await this.active(user, cfg.read);
+    const cfg = this.cfg(area); const permission = area === "users" && query.filter?.eligibleFor === "review" ? "reviews.read" : cfg.read; const { organizationId } = await this.active(user, permission);
     this.validateFilters(area, query.filter ?? {});
     const repository = this.tenants;
     if (area === "users") {
@@ -51,9 +53,78 @@ export class WorkflowsService {
       }));
       return { items, nextCursor: memberships.nextCursor, previousCursor: memberships.previousCursor, total: items.length };
     }
+    if (area === "approvals") return this.approvalQueue(user, organizationId, query);
     const result = await repository.list(cfg.collection, organizationId, { ...query, filters: query.filter ?? {}, allowedSorts: ["updatedAt", "createdAt", "title", "name", "status"] });
     return area === "media" ? { ...result, items: result.items.map((item) => this.safeItem(item)) } : result;
   }
+
+  private async approvalQueue(user: FirebaseIdentity, organizationId: string, query: WorkflowListQueryDto): Promise<ApprovalListResult> {
+    // Deliberately fetch a bounded, tenant-indexed page before applying the mixed legacy
+    // status aliases. Firestore cannot express the aliases and optional assignee in one query.
+    const page = await this.tenants.list("approvals", organizationId, {
+      limit: Math.min(query.limit || 20, 100), sort: "updatedAt", direction: "desc",
+      cursor: query.cursor, allowedSorts: ["updatedAt"], filters: {},
+    });
+    const filters = query.filter ?? {};
+    const current = await this.firebase.getDocument(`users/${user.uid}`);
+    const internalUserId = this.s(current?.id) || this.s(current?.userId) || user.uid;
+    const hydrated = await Promise.all(page.items.map((approval) => this.hydrateApproval(approval)));
+    const items = hydrated.filter((item) => {
+      if (!this.actionable(item.status)) return false;
+      if (filters.status && item.status !== this.normalizeApprovalStatus(filters.status)) return false;
+      if ((filters.type || filters.resourceType || filters.contentType) && item.resourceType !== (filters.type || filters.resourceType || filters.contentType)) return false;
+      if (filters.priority && item.priority !== filters.priority) return false;
+      const assignee = filters.assigneeId || filters.reviewerUserId;
+      if (assignee === "unassigned" && item.reviewerUserId) return false;
+      if ((assignee === "me" || assignee === internalUserId || assignee === user.uid) && item.reviewerUserId !== internalUserId && item.reviewerUserId !== user.uid) return false;
+      if (assignee && !["me", "unassigned", internalUserId, user.uid].includes(assignee) && item.reviewerUserId !== assignee) return false;
+      if ((filters.due || filters.dueBy) && (!item.dueAt || item.dueAt.slice(0, 10) > (filters.due || filters.dueBy))) return false;
+      return true;
+    }).sort((a, b) => this.approvalSort(a, b));
+    return { items, nextCursor: page.nextCursor, total: items.length };
+  }
+
+  private async hydrateApproval(approval: R): Promise<ApprovalQueueItemDto> {
+    const resourceType = this.s(approval.resourceType) || this.s(approval.contentType);
+    const resourceId = this.s(approval.resourceId) || this.s(approval.contentId);
+    const collection = APPROVAL_RESOURCE_COLLECTIONS[resourceType] ?? CONFIG[resourceType]?.collection;
+    const resource = collection ? await this.firebase.getDocument(`${collection}/${resourceId}`) : undefined;
+    const requestedByUserId = this.s(approval.requestedByUserId) || this.s(approval.requestedBy);
+    const reviewerUserId = this.s(approval.reviewerUserId) || this.s(approval.assigneeId);
+    const [requester, reviewer] = await Promise.all([
+      requestedByUserId ? this.firebase.getDocument(`users/${requestedByUserId}`) : undefined,
+      reviewerUserId ? this.firebase.getDocument(`users/${reviewerUserId}`) : undefined,
+    ]);
+    const versionId = this.s(approval.versionId);
+    const version = this.arr(resource?.versions).find((candidate) => this.s((candidate as R).id) === versionId) as R | undefined;
+    const preview = version?.snapshot ?? (versionId && versionId === this.s(resource?.currentVersionId) ? resource?.currentOutput ?? resource?.content ?? resource?.draft : undefined);
+    const priority = this.normalizePriority(approval.priority);
+    const revision = this.revision(approval.revision);
+    return {
+      id: this.s(approval.id), resourceType, resourceId,
+      title: this.s(resource?.title) || this.s(resource?.name) || this.s(resource?.input && (resource.input as R).title) || this.resourceLabel(resourceType),
+      subtitle: this.s(resource?.subtitle) || undefined,
+      status: this.normalizeApprovalStatus(approval.status), priority,
+      dueAt: this.s(approval.dueAt) || this.s(approval.dueBy) || undefined,
+      submittedAt: this.s(approval.submittedAt) || this.s(approval.createdAt) || undefined,
+      requestedByUserId,
+      requestedByName: this.displayName(requester),
+      reviewerUserId: reviewerUserId || undefined,
+      reviewerName: this.displayName(reviewer),
+      versionId: versionId || undefined, revision: revision || undefined,
+      versionLabel: revision ? `v${revision}` : undefined, preview,
+    };
+  }
+
+  private normalizeApprovalStatus(value: unknown): ApprovalStatus {
+    const aliases: Record<string, ApprovalStatus> = { PENDING: "pending", pending: "pending", PENDING_REVIEW: "pending", pending_review: "pending", PENDING_APPROVAL: "pending", pending_approval: "pending", SUBMITTED: "pending", submitted: "pending", AWAITING_REVIEW: "pending", awaiting_review: "pending", IN_REVIEW: "in_review", in_review: "in_review", CHANGES_REQUESTED: "changes_requested", changes_requested: "changes_requested", APPROVED: "approved", approved: "approved", REJECTED: "rejected", rejected: "rejected", CANCELLED: "cancelled", cancelled: "cancelled" };
+    return aliases[this.s(value)] ?? "cancelled";
+  }
+  private actionable(status: ApprovalStatus) { return status === "pending" || status === "in_review" || status === "changes_requested"; }
+  private normalizePriority(value: unknown): ApprovalPriority | undefined { const v = this.s(value).toLowerCase(); return ["low", "normal", "high", "urgent"].includes(v) ? v as ApprovalPriority : undefined; }
+  private approvalSort(a: ApprovalQueueItemDto, b: ApprovalQueueItemDto) { const p = { urgent: 4, high: 3, normal: 2, low: 1 }; const now = Date.now(); const ao = a.dueAt && Date.parse(a.dueAt) < now ? 1 : 0, bo = b.dueAt && Date.parse(b.dueAt) < now ? 1 : 0; return bo - ao || (p[b.priority ?? "normal"] - p[a.priority ?? "normal"]) || (a.dueAt ?? "9999").localeCompare(b.dueAt ?? "9999") || (a.submittedAt ?? "").localeCompare(b.submittedAt ?? ""); }
+  private displayName(user?: R) { const name = this.s(user?.displayName) || this.s(user?.name) || [this.s(user?.firstName), this.s(user?.lastName)].filter(Boolean).join(" "); return name || undefined; }
+  private resourceLabel(type: string) { return ({ themes: "Theme", theme: "Theme", prayers: "Prayer collection", declarations: "Declaration", sermons: "Sermon", flyers: "Flyer", videos: "Video", publishing: "Social post" } as Record<string, string>)[type] ?? "Review item"; }
 
   async create(user: FirebaseIdentity, area: string, body: WorkflowMutationDto) {
     const cfg = this.cfg(area); const { organizationId } = await this.active(user, cfg.create); const now = new Date().toISOString();
@@ -61,7 +132,14 @@ export class WorkflowsService {
     await this.firebase.putDocument(`${cfg.collection}/${this.s(item.id)}`, item); await this.event(user, organizationId, area, this.s(item.id), "draft_created", "Draft created", { revision: item.revision }); return item;
   }
 
-  async get(user: FirebaseIdentity, area: string, id: string) { const cfg = this.cfg(area); const item = await this.item(user, cfg, id, cfg.read); return this.safeItem(item); }
+  async get(user: FirebaseIdentity, area: string, id: string) {
+    const cfg = this.cfg(area); const item = await this.item(user, cfg, id, cfg.read);
+    if (area !== "approvals") return this.safeItem(item);
+    const hydrated = await this.hydrateApproval(item);
+    const comments = await this.firebase.queryDocuments("reviewComments", "organizationId", this.s(item.organizationId), "createdAt", "asc", 500);
+    const timeline = await this.firebase.queryDocuments("workflowEvents", "organizationId", this.s(item.organizationId), "timestamp", "asc", 500);
+    return { ...hydrated, comments: comments.filter((comment) => comment.approvalId === id), timeline: timeline.filter((event) => event.approvalId === id || (event.resourceType === hydrated.resourceType && event.resourceId === hydrated.resourceId)) };
+  }
 
   async patch(user: FirebaseIdentity, area: string, id: string, body: WorkflowMutationDto) {
     const cfg = this.cfg(area); const item = await this.item(user, cfg, id, cfg.update); this.assertRevision(item, body as R);
@@ -73,15 +151,55 @@ export class WorkflowsService {
   async versions(user: FirebaseIdentity, area: string, id: string) { const cfg = this.cfg(area); const item = await this.item(user, cfg, id, cfg.read); return { items: this.arr(item.versions) }; }
   async timeline(user: FirebaseIdentity, area: string, id: string) { const cfg = this.cfg(area); const item = await this.item(user, cfg, id, cfg.read); const events = await this.firebase.queryDocuments("workflowEvents", "organizationId", this.s(item.organizationId), "timestamp", "desc", 500); return { items: events.filter((event) => event.resourceType === area && event.resourceId === id) }; }
   async approval(user: FirebaseIdentity, area: string, id: string) { const cfg = this.cfg(area); const item = await this.item(user, cfg, id, cfg.read); if (!cfg.approve) return null; return this.approvals.current(this.s(item.organizationId), area, id, this.s(item.activeApprovalId)); }
-  async comment(user: FirebaseIdentity, area: string, id: string, body: R) { const cfg = this.cfg(area); const item = await this.item(user, cfg, id, cfg.update); const c = { id: randomUUID(), body: this.s(body.body), mentions: this.arr(body.mentions), resolved: false, actor: user.uid, createdAt: new Date().toISOString(), correlationId: requestContext.getStore()?.correlationId ?? "" }; const updated = { ...item, comments: this.arr(item.comments).concat(c), updatedAt: new Date().toISOString() }; await this.firebase.putDocument(`${cfg.collection}/${id}`, updated); await this.event(user, this.s(item.organizationId), area, id, "comment_added", "Comment added", { versionId: item.currentVersionId, summary: c.body }); return c; }
+  async comment(user: FirebaseIdentity, area: string, id: string, body: R) {
+    const cfg = this.cfg(area); const item = await this.item(user, cfg, id, cfg.update); const text = this.s(body.body);
+    if (!text) throw new UnprocessableEntityException({ code: "review_comment_required", message: "A comment is required." });
+    const c = { id: randomUUID(), approvalId: area === "approvals" ? id : undefined, organizationId: item.organizationId, body: text, fieldPath: this.s(body.fieldPath) || undefined, parentCommentId: this.s(body.parentCommentId) || undefined, resolvedAt: null, authorUserId: user.uid, createdAt: new Date().toISOString(), correlationId: requestContext.getStore()?.correlationId ?? "" };
+    if (area === "approvals") {
+      await this.firebase.putDocument(`reviewComments/${c.id}`, c);
+      await this.event(user, this.s(item.organizationId), this.s(item.resourceType) || this.s(item.contentType), this.s(item.resourceId) || this.s(item.contentId), "comment_added", "Comment added", { approvalId: id, versionId: item.versionId });
+      return c;
+    }
+    const updated = { ...item, comments: this.arr(item.comments).concat(c), updatedAt: new Date().toISOString() }; await this.firebase.putDocument(`${cfg.collection}/${id}`, updated); await this.event(user, this.s(item.organizationId), area, id, "comment_added", "Comment added", { versionId: item.currentVersionId }); return c;
+  }
   async action(user: FirebaseIdentity, area: string, id: string, action: string, body: R = {}) {
     const allowed = ["submit-review", "approve", "request-changes", "reject"]; if (!allowed.includes(action)) throw new UnprocessableEntityException({ code: "unsupported_workflow_action", message: "This action is not supported for content workflows." });
+    if (area === "approvals" && action !== "submit-review") return this.decideApproval(user, id, action, body);
     const cfg = this.cfg(area); if (!cfg.approve) throw new UnprocessableEntityException({ code: "approval_not_supported", message: "This workflow does not support approvals." });
     const item = await this.item(user, cfg, id, action === "approve" || action === "reject" || action === "request-changes" ? cfg.approve : cfg.update); const now = new Date().toISOString();
     if (action === "submit-review") { const approval = await this.approvals.submit(user, item, area, this.s(item.currentVersionId), this.s(item.revision), this.s(body.reviewerUserId) || this.s(body.assigneeId)); const updated = { ...item, status: "pending_approval", approvalState: "pending_approval", activeApprovalId: approval.id, updatedAt: now }; await this.firebase.putDocument(`${cfg.collection}/${id}`, updated); await this.event(user, this.s(item.organizationId), area, id, "submitted_for_review", "Submitted for review", { revision: item.revision, versionId: item.currentVersionId }); return this.safeItem(updated); }
     const active = await this.approvals.current(this.s(item.organizationId), area, id, this.s(item.activeApprovalId)); if (!active) throw new ConflictException({ code: "active_approval_required", message: "No active approval exists for this resource version." });
     const target = action === "request-changes" ? "changes_requested" : action === "approve" ? "approved" : "rejected"; await this.approvals.transition(this.s(active.id), target, user, this.s(body.feedback) || this.s(body.reason));
     const locks = target === "approved" ? this.arr(item.locks).concat({ reason: "approved", versionId: item.currentVersionId, lockedRevision: item.revision, actor: user.uid, timestamp: now }) : this.arr(item.locks); const updated = { ...item, status: target, approvalState: target, locks, updatedAt: now }; await this.firebase.putDocument(`${cfg.collection}/${id}`, updated); await this.event(user, this.s(item.organizationId), area, id, target, target === "changes_requested" ? "Changes requested" : target[0].toUpperCase() + target.slice(1), { revision: item.revision, versionId: item.currentVersionId, summary: this.s(body.feedback) }); return this.safeItem(updated);
+  }
+  async assignApproval(user: FirebaseIdentity, id: string, body: R = {}) {
+    const approval = await this.item(user, CONFIG.approvals, id, "reviews.approve");
+    if (!this.actionable(this.normalizeApprovalStatus(approval.status))) throw new ConflictException({ code: "approval_not_actionable", message: "This approval is no longer actionable." });
+    const requested = this.s(body.reviewerUserId) || user.uid;
+    if (requested !== user.uid) {
+      const membership = await this.firebase.getDocument(`memberships/${this.s(approval.organizationId)}_${requested}`);
+      if (!membership || !this.canReview(membership)) throw new UnprocessableEntityException({ code: "reviewer_not_eligible", message: "The selected user is not eligible to review." });
+    }
+    const now = new Date().toISOString(); const updated = { ...approval, reviewerUserId: requested, status: this.normalizeApprovalStatus(approval.status) === "pending" ? "in_review" : approval.status, updatedAt: now };
+    await this.firebase.putDocument(`approvals/${id}`, updated);
+    await this.event(user, this.s(approval.organizationId), this.s(approval.resourceType) || this.s(approval.contentType), this.s(approval.resourceId) || this.s(approval.contentId), "assigned_to_reviewer", "Assigned to reviewer", { approvalId: id, reviewerUserId: requested, versionId: approval.versionId });
+    return this.hydrateApproval(updated);
+  }
+  private async decideApproval(user: FirebaseIdentity, id: string, action: string, body: R) {
+    const approval = await this.item(user, CONFIG.approvals, id, "reviews.approve");
+    const reason = this.s(body.reason) || this.s(body.feedback);
+    if ((action === "request-changes" || action === "reject") && !reason) throw new UnprocessableEntityException({ code: "approval_reason_required", message: "A reason is required." });
+    const resourceType = this.s(approval.resourceType) || this.s(approval.contentType), resourceId = this.s(approval.resourceId) || this.s(approval.contentId), collection = APPROVAL_RESOURCE_COLLECTIONS[resourceType] ?? CONFIG[resourceType]?.collection;
+    if (!collection) throw new ConflictException({ code: "approval_resource_unsupported", message: "The approval resource type is not supported." });
+    const resource = await this.firebase.getDocument(`${collection}/${resourceId}`);
+    if (!resource) throw new NotFoundException({ code: "resource_not_found", message: "Resource not found." });
+    if (this.revision(resource.revision) !== this.revision(approval.revision) || this.s(resource.currentVersionId) !== this.s(approval.versionId)) throw new ConflictException({ code: "approval_version_stale", message: "This content changed after it was submitted. Refresh and review the new version." });
+    const target = action === "request-changes" ? "changes_requested" : action === "approve" ? "approved" : "rejected";
+    await this.approvals.transition(id, target, user, reason);
+    const now = new Date().toISOString(), locks = target === "approved" ? this.arr(resource.locks).concat({ reason: "approved", versionId: approval.versionId, lockedRevision: approval.revision, actor: user.uid, timestamp: now }) : this.arr(resource.locks);
+    await this.firebase.putDocument(`${collection}/${resourceId}`, { ...resource, status: target, approvalState: target, locks, updatedAt: now });
+    await this.event(user, this.s(approval.organizationId), resourceType, resourceId, target, target === "changes_requested" ? "Changes requested" : target[0].toUpperCase() + target.slice(1), { approvalId: id, versionId: approval.versionId });
+    return this.get(user, "approvals", id);
   }
   async exportJob(user: FirebaseIdentity, area: string, id: string, body: R = {}) { const cfg = this.cfg(area); const item = await this.item(user, cfg, id, cfg.read); return this.job(user, this.s(item.organizationId), cfg.exportType ?? `${area}_job`, { id, ...body }, this.s(body.sourceRevision) || this.s(item.revision)); }
   async generate(user: FirebaseIdentity, area: string, id: string, body: R = {}) { const cfg = this.cfg(area); const item = await this.item(user, cfg, id, cfg.update); if (!cfg.approve) throw new NotImplementedException({ code: "generation_not_supported", message: `Generation for ${area} is not available.` }); const job = await this.job(user, this.s(item.organizationId), `${area}_generation`, { resourceType: area, resourceId: id, ...body }, this.s(item.revision)); const now = new Date().toISOString(); await this.firebase.putDocument(`${cfg.collection}/${id}`, { ...item, status: "generating", approvalState: "generating", updatedAt: now }); await this.event(user, this.s(item.organizationId), area, id, "generation_queued", "Generation queued", { revision: item.revision, summary: `Job ${this.s(job.id)} queued` }); return job; }
@@ -90,7 +208,7 @@ export class WorkflowsService {
   private validateFilters(area: string, filters: Record<string, string>) {
     const allowed: Record<string, readonly string[]> = {
       users: ["eligibleFor"],
-      approvals: ["status", "type", "contentType", "priority", "assigneeId", "due"],
+      approvals: ["status", "type", "resourceType", "contentType", "priority", "assigneeId", "reviewerUserId", "due", "dueBy"],
     };
     const unknown = Object.keys(filters).filter((key) => !(allowed[area] ?? []).includes(key));
     if (unknown.length) throw new UnprocessableEntityException({ code: "unsupported_filter", message: `Unsupported filter(s): ${unknown.join(", ")}.`, validation: unknown.map((field) => ({ field: `filter[${field}]`, message: "Filter is not supported." })) });
