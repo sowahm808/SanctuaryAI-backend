@@ -153,8 +153,8 @@ describe("FirebaseService authentication emulator support", () => {
     ]);
 
     await expect(service.queryDocuments("themes", "organizationId", "org-1", "updatedAt", "desc", 20)).resolves.toEqual([
-      { id: "newest", organizationId: "org-1", updatedAt: "2026-08-03T00:00:00.000Z" },
-      { id: "older", organizationId: "org-1", updatedAt: "2026-08-01T00:00:00.000Z" },
+      { id: "newest", organizationId: "org-1", updatedAt: new Date("2026-08-03T00:00:00.000Z") },
+      { id: "older", organizationId: "org-1", updatedAt: new Date("2026-08-01T00:00:00.000Z") },
     ]);
     expect(firestoreRequest).toHaveBeenCalledWith(":runQuery", expect.objectContaining({
       method: "POST",
@@ -261,6 +261,57 @@ describe("FirebaseService authentication emulator support", () => {
     await expect(service.firestoreRequest(":runQuery", { method: "POST", body: "{}" })).rejects.toMatchObject({
       httpStatus: 400, firebaseMessage: "upstream rejected query",
     });
+  });
+
+  it.each([
+    ["{not-json", "{not-json"],
+    ["", "Bad Request"],
+  ])("preserves a malformed or empty Firebase response (%p)", async (raw, message) => {
+    jest.spyOn(global, "fetch").mockResolvedValue(new Response(raw, { status: 400, statusText: "Bad Request" }));
+    const service = new FirebaseService(config({ ...values, FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080" }));
+    await expect(service.firestoreRequest(":runQuery", { method: "POST", body: "{}" })).rejects.toMatchObject({
+      httpStatus: 400, firebaseMessage: message,
+    });
+  });
+
+  it.each([
+    ["NOT_FOUND", 404],
+    ["UNAVAILABLE", 503],
+  ])("retains the %s provider classification", async (status, code) => {
+    jest.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify({ error: { code, status, message: `${status} message` } }), { status: code }));
+    const service = new FirebaseService(config({ ...values, FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080" }));
+    await expect(service.firestoreRequest("themes/missing", { method: "GET" })).rejects.toMatchObject({
+      httpStatus: code, firebaseStatus: status, firebaseCode: code, firebaseMessage: `${status} message`,
+    });
+  });
+
+  it("encodes supported Firestore values and decodes timestamps as Date objects", () => {
+    const service = new FirebaseService(config(values));
+    const encodeValue = (service as unknown as { encodeValue(value: unknown): unknown }).encodeValue.bind(service);
+    const decodeValue = (service as unknown as { decodeValue(value: unknown): unknown }).decodeValue.bind(service);
+    const instant = new Date("2026-08-07T00:00:00Z");
+
+    expect(encodeValue(instant)).toEqual({ timestampValue: "2026-08-07T00:00:00.000Z" });
+    expect(encodeValue("text")).toEqual({ stringValue: "text" });
+    expect(encodeValue(true)).toEqual({ booleanValue: true });
+    expect(encodeValue(2)).toEqual({ integerValue: "2" });
+    expect(encodeValue(2.5)).toEqual({ doubleValue: 2.5 });
+    expect(encodeValue(null)).toEqual({ nullValue: null });
+    expect(encodeValue([instant])).toEqual({ arrayValue: { values: [{ timestampValue: "2026-08-07T00:00:00.000Z" }] } });
+    expect(encodeValue({ nested: { at: instant } })).toEqual({ mapValue: { fields: { nested: { mapValue: { fields: { at: { timestampValue: "2026-08-07T00:00:00.000Z" } } } } } } });
+    expect(decodeValue({ timestampValue: "2026-08-07T00:00:00Z" })).toEqual(instant);
+    expect(decodeValue({ timestampValue: "2026-08-07T00:00:00Z" })).toBeInstanceOf(Date);
+  });
+
+  it("rejects invalid dates, invalid timestamp payloads, and unsupported class instances", () => {
+    const service = new FirebaseService(config(values));
+    const encodeValue = (service as unknown as { encodeValue(value: unknown): unknown }).encodeValue.bind(service);
+    const decodeValue = (service as unknown as { decodeValue(value: unknown): unknown }).decodeValue.bind(service);
+    class Unsupported {}
+
+    expect(() => encodeValue(new Date("invalid"))).toThrow("Cannot encode invalid Date");
+    expect(() => encodeValue(new Unsupported())).toThrow("Cannot encode unsupported Firestore value");
+    expect(() => decodeValue({ timestampValue: "invalid" })).toThrow("Cannot decode invalid Firestore timestamp");
   });
 
   it("places a subcollection parent in the runQuery endpoint rather than its body", async () => {
