@@ -1,6 +1,13 @@
 import { buildCollectionQuery, encodeCollectionCursor } from "../src/database/collection-query";
 
 describe("Firestore collection query serializer", () => {
+  it("serializes a minimal collection-only query with a numeric limit", () => {
+    expect(buildCollectionQuery({ collection: "themes", limit: 0, projectId: "demo" })).toEqual({
+      from: [{ collectionId: "themes" }],
+      limit: 1,
+    });
+  });
+
   it.each(["asc", "desc"] as const)("serializes tenant ordering and the document-name tie breaker (%s)", (direction) => {
     const actual = buildCollectionQuery({ collection: "themes", organizationId: "org-1", sort: "updatedAt", direction, limit: 20, projectId: "demo" });
     expect(actual).toEqual({
@@ -30,5 +37,14 @@ describe("Firestore collection query serializer", () => {
         { stringValue: "pending_approval" },
         { referenceValue: "projects/demo/databases/(default)/documents/approvals/approval-1" },
       ] } });
+  });
+
+  it("serializes multiple equality filters as an AND composite", () => {
+    expect(buildCollectionQuery({ collection: "approvals", organizationId: "org-1", filters: { status: "pending", priority: "high" }, limit: 20, projectId: "demo" }))
+      .toMatchObject({ where: { compositeFilter: { op: "AND", filters: [
+        { fieldFilter: { field: { fieldPath: "organizationId" }, op: "EQUAL", value: { stringValue: "org-1" } } },
+        { fieldFilter: { field: { fieldPath: "status" }, op: "EQUAL", value: { stringValue: "pending" } } },
+        { fieldFilter: { field: { fieldPath: "priority" }, op: "EQUAL", value: { stringValue: "high" } } },
+      ] } } });
   });
 });
