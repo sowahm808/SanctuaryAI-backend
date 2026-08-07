@@ -1,4 +1,6 @@
-import { IsArray, IsIn, IsObject, IsOptional, IsString } from "class-validator";
+import { Type } from "class-transformer";
+import { IsArray, IsIn, IsInt, IsObject, IsOptional, IsString, Max, Min } from "class-validator";
+export class ThemeListQueryDto { @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) limit = 20; @IsOptional() @IsIn(["createdAt", "updatedAt"]) sort: "createdAt" | "updatedAt" = "updatedAt"; @IsOptional() @IsIn(["asc", "desc"]) direction: "asc" | "desc" = "desc"; }
 export class ThemeInputDto { @IsOptional() @IsIn(["themes"]) kind?: string; @IsOptional() @IsObject() brief?: Record<string, unknown>; @IsOptional() @IsString() date?: string; @IsOptional() @IsString() campaignId?: string; @IsOptional() @IsString() topic?: string; @IsOptional() @IsArray() scriptures?: unknown[]; @IsOptional() @IsString() spiritualEmphasis?: string; @IsOptional() @IsString() pastorNotes?: string; @IsOptional() @IsString() previousTheme?: string; @IsOptional() @IsArray() events?: unknown[]; @IsOptional() @IsString() tone?: string; @IsOptional() @IsString() audience?: string; @IsOptional() @IsString() bibleTranslation?: string; @IsOptional() @IsString() templateId?: string; }
 export class ThemePatchInputDto extends ThemeInputDto { @IsString() revision!: string; @IsOptional() @IsString() idempotencyKey?: string; }
 export class ThemeOutputDto { @IsString() revision!: string; @IsOptional() @IsObject() output?: Record<string, unknown>; @IsOptional() @IsString() changeSummary?: string; }
