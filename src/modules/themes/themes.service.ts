@@ -7,7 +7,19 @@ import { ThemeGenerationService } from "./theme-generation.service";
 import { ThemeGenerationQueue } from "./theme-generation.queue";
 type R=Record<string,unknown>; const FIELDS=["title","subtitle","scriptures","explanation","pastoralIntroduction","objectives","weeklyDirection","confession","declaration","hashtags","flyerHeadline","designConcept"];
 @Injectable() export class ThemesService{private readonly logger=new Logger(ThemesService.name); constructor(private readonly firebase:FirebaseService, private readonly generator:ThemeGenerationService, private readonly queue:ThemeGenerationQueue){}
- async list(user:FirebaseIdentity,query:ThemeListQueryDto){const {organizationId}=await this.active(user,"themes.read"); const items=await this.firebase.queryDocuments("themes","organizationId",organizationId,query.sort,query.direction,query.limit); return {items,nextCursor:null};}
+ async list(user:FirebaseIdentity,query:ThemeListQueryDto){
+  const {organizationId}=await this.active(user,"themes.read");
+  try {
+   const items=await this.firebase.queryDocuments("themes","organizationId",organizationId,query.sort,query.direction,query.limit);
+   return {items,nextCursor:null,previousCursor:null,total:items.length};
+  } catch(error) {
+   const correlationId=requestContext.getStore()?.correlationId??randomUUID();
+   const response=error instanceof ServiceUnavailableException?error.getResponse():undefined;
+   const failure=error instanceof Error?{name:error.name,message:error.message,response}: {name:"UnknownError",message:String(error)};
+   this.logger.error({event:"theme.collection.query_failed",correlationId,organizationId,limit:query.limit,sort:query.sort,direction:query.direction,error:failure},"Theme collection query failed");
+   throw new ServiceUnavailableException({code:"theme_list_unavailable",detail:"Themes are temporarily unavailable. Please retry shortly.",correlationId,validation:[]});
+  }
+ }
  async create(user:FirebaseIdentity,dto:ThemeInputDto){const {organizationId}=await this.active(user,"themes.create"); const input=this.normalizeInput(dto); this.validateInput(input); const now=new Date().toISOString(), id=randomUUID(), revision=randomUUID(); const theme={id,organizationId,input,currentOutput:this.blank(),approvalState:"draft",comments:[],versions:[],locks:[],auditSummary:[],revision,createdBy:user.uid,createdAt:now,updatedAt:now}; await this.firebase.putDocument(`themes/${id}`,theme); await this.audit(user,organizationId,"theme.create",{themeId:id,revision}); return theme;}
  async get(user:FirebaseIdentity,id:string){return this.theme(user,id,"themes.read")}
  async patchInput(user:FirebaseIdentity,id:string,dto:ThemePatchInputDto){const t=await this.theme(user,id,"themes.update"); if(this.s(t.revision)!==dto.revision) throw new ConflictException({code:"revision_conflict",message:"The theme is stale.",currentRevision:this.s(t.revision)}); this.validateInput(dto); const revision=randomUUID(), updated={...t,input:{...(t.input as R??{}),...dto},revision,updatedAt:new Date().toISOString()}; await this.firebase.putDocument(`themes/${id}`,updated); await this.audit(user,this.s(t.organizationId),"theme.input.save",{themeId:id,revision}); return updated;}

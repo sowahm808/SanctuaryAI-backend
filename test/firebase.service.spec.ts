@@ -151,4 +151,26 @@ describe("FirebaseService authentication emulator support", () => {
       expect.objectContaining({ method: "PATCH" }),
     );
   });
+
+  it("builds the production theme list query and preserves Firestore ordering", async () => {
+    const service = new FirebaseService(config(values));
+    const firestoreRequest = jest.spyOn(service, "firestoreRequest").mockResolvedValue([
+      { document: { name: "projects/demo/databases/(default)/documents/themes/newest", fields: { organizationId: { stringValue: "org-1" }, updatedAt: { timestampValue: "2026-08-03T00:00:00.000Z" } } } },
+      { document: { name: "projects/demo/databases/(default)/documents/themes/older", fields: { organizationId: { stringValue: "org-1" }, updatedAt: { timestampValue: "2026-08-01T00:00:00.000Z" } } } },
+    ]);
+
+    await expect(service.queryDocuments("themes", "organizationId", "org-1", "updatedAt", "desc", 20)).resolves.toEqual([
+      { id: "newest", organizationId: "org-1", updatedAt: "2026-08-03T00:00:00.000Z" },
+      { id: "older", organizationId: "org-1", updatedAt: "2026-08-01T00:00:00.000Z" },
+    ]);
+    expect(firestoreRequest).toHaveBeenCalledWith(":runQuery", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ structuredQuery: {
+        from: [{ collectionId: "themes" }],
+        where: { fieldFilter: { field: { fieldPath: "organizationId" }, op: "EQUAL", value: { stringValue: "org-1" } } },
+        orderBy: [{ field: { fieldPath: "updatedAt" }, direction: "DESCENDING" }],
+        limit: 20,
+      } }),
+    }));
+  });
 });
