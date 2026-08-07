@@ -90,27 +90,36 @@ export class FirebaseService {
       signal: AbortSignal.timeout(10_000),
     });
     const raw = await response.text();
-    let body: T & FirebaseError;
-    let parsed = false;
+    let body: unknown;
     try {
-      body = (raw ? JSON.parse(raw) : {}) as T & FirebaseError;
-      parsed = raw.length > 0;
+      body = raw ? JSON.parse(raw) : undefined;
     } catch {
-      body = {} as T & FirebaseError;
+      body = undefined;
     }
     if (!response.ok) {
-      const provider = body.error;
+      const provider = this.firebaseErrorEnvelope(body);
       const failure = {
         httpStatus: response.status,
         firebaseStatus: provider?.status,
         firebaseCode: provider?.code,
-        firebaseMessage: provider?.message ?? (!parsed && raw.trim() ? raw.trim() : undefined) ?? response.statusText ?? "Unknown Firebase error",
+        firebaseMessage: provider?.message ?? (raw.trim() || response.statusText || "Firebase request failed"),
         firebaseDetails: provider?.details,
       };
       this.logger.error({ event: "firebase.request_failed", ...failure });
       throw new FirestoreRequestError(failure.httpStatus, failure.firebaseStatus, failure.firebaseCode, failure.firebaseMessage, failure.firebaseDetails);
     }
-    return body;
+    return body as T;
+  }
+
+  private firebaseErrorEnvelope(value: unknown): FirebaseError["error"] {
+    if (!this.isPlainObject(value) || !this.isPlainObject(value.error)) return undefined;
+    const error = value.error;
+    return {
+      code: typeof error.code === "number" ? error.code : undefined,
+      message: typeof error.message === "string" ? error.message : undefined,
+      status: typeof error.status === "string" ? error.status : undefined,
+      details: error.details,
+    };
   }
 
   private async serviceAccessToken(): Promise<string> {
@@ -472,8 +481,9 @@ export class FirebaseService {
     const hasMore = decoded.length > limit;
     const items = decoded.slice(0, limit);
     const last = items.at(-1), lastValue = last?.[sort], lastId = last?.id;
-    const nextCursor = hasMore && typeof lastValue === "string" && typeof lastId === "string"
-      ? encodeCollectionCursor({ value: lastValue, id: lastId })
+    const cursorValue = lastValue instanceof Date ? lastValue.toISOString() : lastValue;
+    const nextCursor = hasMore && typeof cursorValue === "string" && typeof lastId === "string"
+      ? encodeCollectionCursor({ value: cursorValue, id: lastId })
       : null;
     return { items, nextCursor, previousCursor: null, total: items.length };
   }
@@ -543,12 +553,23 @@ export class FirebaseService {
     if (Array.isArray(value)) {
       return { arrayValue: { values: value.map((item) => this.encodeValue(item)) } };
     }
-    if (typeof value === "object") {
-      return { mapValue: { fields: this.encodeFields(value as Record<string, unknown>) } };
+    if (value instanceof Date) {
+      if (Number.isNaN(value.getTime())) {
+        throw new TypeError("Cannot encode invalid Date as Firestore timestamp");
+      }
+      return { timestampValue: value.toISOString() };
+    }
+    if (this.isPlainObject(value)) {
+      return { mapValue: { fields: this.encodeFields(value) } };
     }
     if (typeof value === "string") return { stringValue: value };
-    if (typeof value === "bigint" || typeof value === "symbol") return { stringValue: value.toString() };
-    return { stringValue: "" };
+    throw new TypeError(`Cannot encode unsupported Firestore value of type ${typeof value}`);
+  }
+
+  private isPlainObject(value: unknown): value is Record<string, unknown> {
+    if (typeof value !== "object" || value === null) return false;
+    const prototype = Object.getPrototypeOf(value) as unknown;
+    return prototype === Object.prototype || prototype === null;
   }
 
   private decodeFields(fields: Record<string, FirestoreValue>): Record<string, unknown> {
@@ -560,7 +581,13 @@ export class FirebaseService {
   private decodeValue(value: FirestoreValue): unknown {
     if ("stringValue" in value) return value.stringValue;
     if ("booleanValue" in value) return value.booleanValue;
-    if ("timestampValue" in value) return value.timestampValue;
+    if ("timestampValue" in value) {
+      const timestamp = new Date(value.timestampValue);
+      if (Number.isNaN(timestamp.getTime())) {
+        throw new TypeError(`Cannot decode invalid Firestore timestamp: ${value.timestampValue}`);
+      }
+      return timestamp;
+    }
     if ("integerValue" in value) return Number(value.integerValue);
     if ("doubleValue" in value) return value.doubleValue;
     if ("nullValue" in value) return null;
