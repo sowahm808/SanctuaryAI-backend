@@ -71,6 +71,10 @@ export class WorkflowsController {
   draft(@CurrentUser() user: FirebaseIdentity, @Param("area", workflowAreaPipe) area: WorkflowArea, @Param("id") id: string, @Body() body: R) { return this.workflows.draft(user, area, id, body); }
   @Get(":area/:id/versions")
   versions(@CurrentUser() user: FirebaseIdentity, @Param("area", workflowAreaPipe) area: WorkflowArea, @Param("id") id: string) { return this.workflows.versions(user, area, id); }
+  @Get(":area/:id/timeline")
+  timeline(@CurrentUser() user: FirebaseIdentity, @Param("area", workflowAreaPipe) area: WorkflowArea, @Param("id") id: string) { return this.workflows.timeline(user, area, id); }
+  @Get(":area/:id/approval")
+  approval(@CurrentUser() user: FirebaseIdentity, @Param("area", workflowAreaPipe) area: WorkflowArea, @Param("id") id: string) { return this.workflows.approval(user, area, id); }
   @Post(":area/:id/comments")
   comment(@CurrentUser() user: FirebaseIdentity, @Param("area", workflowAreaPipe) area: WorkflowArea, @Param("id") id: string, @Body() body: R) { return this.workflows.comment(user, area, id, body); }
   @Post(":area/:id/exports")
