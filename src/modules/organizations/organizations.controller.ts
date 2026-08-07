@@ -2,7 +2,7 @@ import { Body, Controller, Get, Patch, Post, Put, UseGuards } from "@nestjs/comm
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { FirebaseIdentity } from "../../database/firebase.service";
 import { CurrentUser, FirebaseAuthGuard } from "../../security/firebase-auth.guard";
-import { CreateOrganizationDto, InvitationDto, OnboardingDraftDto, PatchOrganizationDto, SocialHandoffDto } from "./dto";
+import { CreateOrganizationDto, InvitationDto, OnboardingDraftDto, PatchOrganizationDto, SocialHandoffDto, UpdateBrandKitDto } from "./dto";
 import { CreatedOrganizationResult, OrganizationsService } from "./organizations.service";
 
 @ApiTags("Organizations")
@@ -21,6 +21,14 @@ export class OrganizationsController {
 
   @Patch("current")
   patchCurrent(@CurrentUser() user: FirebaseIdentity, @Body() dto: PatchOrganizationDto): Promise<Record<string, unknown>> { return this.organizations.patchCurrent(user, dto); }
+
+  @Get("current/brand-kit")
+  @ApiOperation({ summary: "Get the active organization's optional brand kit" })
+  brandKit(@CurrentUser() user: FirebaseIdentity): Promise<Record<string, unknown> | null> { return this.organizations.brandKit(user); }
+
+  @Patch("current/brand-kit")
+  @ApiOperation({ summary: "Create or update the active organization's brand kit" })
+  patchBrandKit(@CurrentUser() user: FirebaseIdentity, @Body() dto: UpdateBrandKitDto): Promise<Record<string, unknown>> { return this.organizations.patchBrandKit(user, dto); }
 
   @Post("current/invitations")
   invite(@CurrentUser() user: FirebaseIdentity, @Body() dto: InvitationDto): Promise<Record<string, unknown>> { return this.organizations.invite(user, dto); }

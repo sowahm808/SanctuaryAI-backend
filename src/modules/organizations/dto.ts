@@ -1,4 +1,4 @@
-import { IsArray, IsEmail, IsHexColor, IsIn, IsInt, IsObject, IsOptional, IsString, IsUrl, Max, Min, MinLength } from "class-validator";
+import { ArrayMaxSize, IsArray, IsEmail, IsHexColor, IsIn, IsInt, IsObject, IsOptional, IsString, IsUrl, Matches, Max, MaxLength, Min, MinLength } from "class-validator";
 import { Transform } from "class-transformer";
 
 function stringArray(value: unknown): unknown {
@@ -71,3 +71,10 @@ export class PatchOrganizationDto extends CreateOrganizationDto {
 
 export class InvitationDto { @IsEmail() email!: string; @IsString() role!: string; }
 export class SocialHandoffDto { @IsString() provider!: string; @IsOptional() @IsUrl({ require_tld: false }) redirectUrl?: string; }
+
+export class UpdateBrandKitDto {
+  @IsOptional() @IsString() @MaxLength(128) logoAssetId?: string | null;
+  @IsOptional() @IsArray() @ArrayMaxSize(20) @IsHexColor({ each: true }) colorPalette?: string[];
+  @IsOptional() @IsArray() @ArrayMaxSize(20) @IsString({ each: true }) @MaxLength(100, { each: true })
+  @Matches(/^[\p{L}\p{N}][\p{L}\p{N} .,'_-]*$/u, { each: true }) fontFamilies?: string[];
+}

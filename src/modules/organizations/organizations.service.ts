@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { FirebaseIdentity, FirebaseService } from "../../database/firebase.service";
 import { requestContext } from "../../common/request-context";
 import { PERMISSIONS, ROLES } from "../auth/auth.types";
-import { CreateOrganizationDto, InvitationDto, OnboardingDraftDto, PatchOrganizationDto, SocialHandoffDto } from "./dto";
+import { CreateOrganizationDto, InvitationDto, OnboardingDraftDto, PatchOrganizationDto, SocialHandoffDto, UpdateBrandKitDto } from "./dto";
 
 type RecordValue = Record<string, unknown>;
 
@@ -31,6 +31,34 @@ export class OrganizationsService {
     await this.firebase.putDocument(`organizations/${organizationId}`, updated);
     await this.audit(user, organizationId, "organization.update", "success", { fields: Object.keys(this.profileFields(dto)) });
     return this.profile(updated);
+  }
+
+  async brandKit(user: FirebaseIdentity): Promise<RecordValue | null> {
+    const { organizationId } = await this.active(user, "organizations.read");
+    const brandKit = await this.firebase.getDocument(`brandKits/${organizationId}`);
+    return brandKit ? this.brandKitView(brandKit, organizationId) : null;
+  }
+
+  async patchBrandKit(user: FirebaseIdentity, dto: UpdateBrandKitDto): Promise<RecordValue> {
+    const { organizationId } = await this.active(user, "settings.manage");
+    if (dto.logoAssetId) {
+      const asset = await this.firebase.getDocument(`mediaAssets/${dto.logoAssetId}`);
+      if (!asset || this.stringValue(asset.organizationId) !== organizationId) {
+        throw new BadRequestException({ code: "invalid_logo_asset", message: "The logo must be a media asset owned by the active organization." });
+      }
+    }
+    const existing = await this.firebase.getDocument(`brandKits/${organizationId}`);
+    const now = new Date().toISOString();
+    const brandKit = {
+      ...(existing ?? {}), id: organizationId, organizationId,
+      ...(dto.logoAssetId !== undefined ? { logoAssetId: dto.logoAssetId } : {}),
+      ...(dto.colorPalette !== undefined ? { colorPalette: dto.colorPalette } : {}),
+      ...(dto.fontFamilies !== undefined ? { fontFamilies: dto.fontFamilies } : {}),
+      createdAt: existing?.createdAt ?? now, updatedAt: now,
+    };
+    await this.firebase.putDocument(`brandKits/${organizationId}`, brandKit);
+    await this.audit(user, organizationId, "brand_kit.update", "success", { fields: Object.keys(dto) });
+    return this.brandKitView(brandKit, organizationId);
   }
 
   async getDraft(user: FirebaseIdentity): Promise<RecordValue> {
@@ -80,6 +108,15 @@ export class OrganizationsService {
     return fields;
   }
   private profile(org: RecordValue) { const { createdBy, ...safe } = org; void createdBy; return safe; }
+  private brandKitView(brandKit: RecordValue, organizationId: string): RecordValue {
+    return {
+      id: this.stringValue(brandKit.id) || organizationId,
+      organizationId,
+      ...(this.stringValue(brandKit.logoAssetId) ? { logoAssetId: this.stringValue(brandKit.logoAssetId) } : {}),
+      colorPalette: this.stringArray(brandKit.colorPalette),
+      fontFamilies: this.stringArray(brandKit.fontFamilies),
+    };
+  }
   private safeMembership(m: RecordValue) { return { id: m.id, organizationId: m.organizationId, userId: m.userId, role: m.role, status: m.status, permissions: m.permissions }; }
   private async job(user: FirebaseIdentity, organizationId: string, type: string, payload: RecordValue) { const now = new Date().toISOString(); const id = randomUUID(); const job = { id, organizationId, type, status: "queued", progress: 0, retryable: true, payload, createdBy: user.uid, createdAt: now, updatedAt: now }; await this.firebase.putDocument(`asyncJobs/${id}`, job); await this.audit(user, organizationId, `${type}.queue`, "success", { type }); return { id, type, status: "queued", progress: 0, retryable: true, createdAt: now }; }
   private async audit(user: FirebaseIdentity, organizationId: string, action: string, outcome: string, summary: RecordValue) { const id = randomUUID(); await this.firebase.putDocument(`auditEvents/${id}`, { id, correlationId: requestContext.getStore()?.correlationId ?? "", actor: user.uid, organizationId, resource: action, outcome, summary, createdAt: new Date().toISOString() }); }
