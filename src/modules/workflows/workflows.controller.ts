@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Param, ParseEnumPipe, Patch, Post, Put, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, ParseEnumPipe, Patch, Post, Put, Query, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { FirebaseIdentity } from "../../database/firebase.service";
 import { CurrentUser, FirebaseAuthGuard } from "../../security/firebase-auth.guard";
 import { WorkflowsService } from "./workflows.service";
+import { WorkflowListQueryDto, WorkflowMutationDto } from "./dto";
 
 type R = Record<string, unknown>;
 
@@ -59,13 +60,13 @@ export class WorkflowsController {
   constructor(private readonly workflows: WorkflowsService) {}
 
   @Get(":area")
-  list(@CurrentUser() user: FirebaseIdentity, @Param("area", workflowAreaPipe) area: WorkflowArea) { return this.workflows.list(user, area); }
+  list(@CurrentUser() user: FirebaseIdentity, @Param("area", workflowAreaPipe) area: WorkflowArea, @Query() query: WorkflowListQueryDto) { return this.workflows.list(user, area, query); }
   @Post(":area")
-  create(@CurrentUser() user: FirebaseIdentity, @Param("area", workflowAreaPipe) area: WorkflowArea, @Body() body: R) { return this.workflows.create(user, area, body); }
+  create(@CurrentUser() user: FirebaseIdentity, @Param("area", workflowAreaPipe) area: WorkflowArea, @Body() body: WorkflowMutationDto) { return this.workflows.create(user, area, body); }
   @Get(":area/:id")
   get(@CurrentUser() user: FirebaseIdentity, @Param("area", workflowAreaPipe) area: WorkflowArea, @Param("id") id: string) { return this.workflows.get(user, area, id); }
   @Patch(":area/:id")
-  patch(@CurrentUser() user: FirebaseIdentity, @Param("area", workflowAreaPipe) area: WorkflowArea, @Param("id") id: string, @Body() body: R) { return this.workflows.patch(user, area, id, body); }
+  patch(@CurrentUser() user: FirebaseIdentity, @Param("area", workflowAreaPipe) area: WorkflowArea, @Param("id") id: string, @Body() body: WorkflowMutationDto) { return this.workflows.patch(user, area, id, body); }
   @Put(":area/:id/draft")
   draft(@CurrentUser() user: FirebaseIdentity, @Param("area", workflowAreaPipe) area: WorkflowArea, @Param("id") id: string, @Body() body: R) { return this.workflows.draft(user, area, id, body); }
   @Get(":area/:id/versions")
