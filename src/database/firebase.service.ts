@@ -2,6 +2,7 @@ import {
   Injectable,
   ServiceUnavailableException,
   UnauthorizedException,
+  UnprocessableEntityException,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import {
@@ -444,6 +445,45 @@ export class FirebaseService {
         .slice(0, limit);
     }
     return this.decodeQueryResults(results);
+  }
+
+  async queryDocumentsPage(
+    collection: string,
+    field: string,
+    value: string,
+    sort: string,
+    direction: "asc" | "desc",
+    limit: number,
+    cursor?: string,
+  ): Promise<{ items: Record<string, unknown>[]; nextCursor: string | null; previousCursor: null; total: number }> {
+    const where = { fieldFilter: { field: { fieldPath: field }, op: "EQUAL", value: { stringValue: value } } };
+    const structuredQuery: Record<string, unknown> = {
+      from: [{ collectionId: collection }],
+      where,
+      orderBy: [
+        { field: { fieldPath: sort }, direction: direction === "asc" ? "ASCENDING" : "DESCENDING" },
+        { field: { fieldPath: "__name__" }, direction: direction === "asc" ? "ASCENDING" : "DESCENDING" },
+      ],
+      limit: limit + 1,
+    };
+    if (cursor) {
+      let decoded: { value?: unknown; id?: unknown };
+      try { decoded = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as { value?: unknown; id?: unknown }; }
+      catch { throw new UnprocessableEntityException({ code: "invalid_cursor", message: "The pagination cursor is invalid." }); }
+      if (typeof decoded.value !== "string" || typeof decoded.id !== "string" || !decoded.id) throw new UnprocessableEntityException({ code: "invalid_cursor", message: "The pagination cursor is invalid." });
+      structuredQuery.startAt = { before: false, values: [
+        { stringValue: decoded.value },
+        { referenceValue: `projects/${this.projectId}/databases/(default)/documents/${collection}/${decoded.id}` },
+      ] };
+    }
+    const decoded = this.decodeQueryResults(await this.runQuery(structuredQuery));
+    const hasMore = decoded.length > limit;
+    const items = decoded.slice(0, limit);
+    const last = items.at(-1), lastValue = last?.[sort], lastId = last?.id;
+    const nextCursor = hasMore && typeof lastValue === "string" && typeof lastId === "string"
+      ? Buffer.from(JSON.stringify({ value: lastValue, id: lastId }), "utf8").toString("base64url")
+      : null;
+    return { items, nextCursor, previousCursor: null, total: items.length };
   }
 
   private runQuery(structuredQuery: Record<string, unknown>): Promise<FirestoreQueryResult[]> {

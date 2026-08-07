@@ -9,6 +9,9 @@ export class ThemeListQueryDto {
 
   @IsOptional() @IsIn(["asc", "desc"])
   direction: "asc" | "desc" = "desc";
+
+  @IsOptional() @IsString()
+  cursor?: string;
 }
 export class ThemeInputDto { @IsOptional() @IsIn(["themes"]) kind?: string; @IsOptional() @IsObject() brief?: Record<string, unknown>; @IsOptional() @IsString() date?: string; @IsOptional() @IsString() campaignId?: string; @IsOptional() @IsString() topic?: string; @IsOptional() @IsArray() scriptures?: unknown[]; @IsOptional() @IsString() spiritualEmphasis?: string; @IsOptional() @IsString() pastorNotes?: string; @IsOptional() @IsString() previousTheme?: string; @IsOptional() @IsArray() events?: unknown[]; @IsOptional() @IsString() tone?: string; @IsOptional() @IsString() audience?: string; @IsOptional() @IsString() bibleTranslation?: string; @IsOptional() @IsString() templateId?: string; }
 export class ThemePatchInputDto extends ThemeInputDto { @IsString() revision!: string; @IsOptional() @IsString() idempotencyKey?: string; }

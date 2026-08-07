@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, ServiceUnavailableException, UnprocessableEntityException } from "@nestjs/common";
+import { ConflictException, ForbiddenException, HttpException, Injectable, Logger, NotFoundException, ServiceUnavailableException, UnprocessableEntityException } from "@nestjs/common";
 import { createHash, randomUUID } from "node:crypto";
 import { requestContext } from "../../common/request-context";
 import { FirebaseIdentity, FirebaseService } from "../../database/firebase.service";
@@ -10,13 +10,14 @@ type R=Record<string,unknown>; const FIELDS=["title","subtitle","scriptures","ex
  async list(user:FirebaseIdentity,query:ThemeListQueryDto){
   const {organizationId}=await this.active(user,"themes.read");
   try {
-   const items=await this.firebase.queryDocuments("themes","organizationId",organizationId,query.sort,query.direction,query.limit);
-   return {items,nextCursor:null,previousCursor:null,total:items.length};
+   return await this.firebase.queryDocumentsPage("themes","organizationId",organizationId,query.sort,query.direction,query.limit,query.cursor);
   } catch(error) {
+   if(error instanceof HttpException && !(error instanceof ServiceUnavailableException)) throw error;
    const correlationId=requestContext.getStore()?.correlationId??randomUUID();
    const response=error instanceof ServiceUnavailableException?error.getResponse():undefined;
-   const failure=error instanceof Error?{name:error.name,message:error.message,response}: {name:"UnknownError",message:String(error)};
-   this.logger.error({event:"theme.collection.query_failed",correlationId,organizationId,limit:query.limit,sort:query.sort,direction:query.direction,error:failure},"Theme collection query failed");
+   const firebaseResponse=typeof response==="object"&&response!==null?response as Record<string,unknown>:undefined;
+   const errorCode=typeof error==="object"&&error!==null&&"code" in error?(error as {code?:unknown}).code:firebaseResponse?.firebaseStatus;
+   this.logger.error({event:"theme.collection.query_failed",correlationId,organizationId,limit:query.limit,sort:query.sort,direction:query.direction,cursor:query.cursor,errorCode,errorName:error instanceof Error?error.name:"UnknownError",errorMessage:error instanceof Error?error.message:String(error)},"Theme collection query failed");
    throw new ServiceUnavailableException({code:"theme_list_unavailable",detail:"Themes are temporarily unavailable. Please retry shortly.",correlationId,validation:[]});
   }
  }

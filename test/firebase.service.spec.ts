@@ -200,6 +200,28 @@ describe("FirebaseService authentication emulator support", () => {
     }));
   });
 
+  it("returns a stable Firestore cursor page in descending updatedAt order", async () => {
+    const service = new FirebaseService(config(values));
+    const firestoreRequest = jest.spyOn(service, "firestoreRequest").mockResolvedValue([
+      { document: { name: "projects/demo/databases/(default)/documents/themes/newest", fields: { updatedAt: { stringValue: "2026-08-03T00:00:00.000Z" } } } },
+      { document: { name: "projects/demo/databases/(default)/documents/themes/older", fields: { updatedAt: { stringValue: "2026-08-02T00:00:00.000Z" } } } },
+    ]);
+
+    const page = await service.queryDocumentsPage("themes", "organizationId", "org-1", "updatedAt", "desc", 1);
+
+    expect(page.items).toEqual([{ id: "newest", updatedAt: "2026-08-03T00:00:00.000Z" }]);
+    expect(page.nextCursor).toEqual(expect.any(String));
+    expect(firestoreRequest).toHaveBeenCalledWith(":runQuery", expect.objectContaining({
+      body: expect.stringContaining('"direction":"DESCENDING"'),
+    }));
+
+    firestoreRequest.mockClear().mockResolvedValue([]);
+    await service.queryDocumentsPage("themes", "organizationId", "org-1", "updatedAt", "desc", 1, page.nextCursor!);
+    expect(firestoreRequest).toHaveBeenCalledWith(":runQuery", expect.objectContaining({
+      body: expect.stringContaining('"referenceValue":"projects/demo-sanctuary/databases/(default)/documents/themes/newest"'),
+    }));
+  });
+
   it("calls Firestore runQuery as an RPC on the documents resource", async () => {
     const fetchMock = jest.spyOn(global, "fetch").mockResolvedValue(
       new Response(JSON.stringify([]), {
