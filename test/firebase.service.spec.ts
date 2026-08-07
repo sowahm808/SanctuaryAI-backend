@@ -173,4 +173,25 @@ describe("FirebaseService authentication emulator support", () => {
       } }),
     }));
   });
+
+  it("calls Firestore runQuery as an RPC on the documents resource", async () => {
+    const fetchMock = jest.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const service = new FirebaseService(config({
+      ...values,
+      FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080",
+    }));
+
+    await expect(
+      service.queryDocuments("themes", "organizationId", "org-1", "updatedAt", "desc", 20),
+    ).resolves.toEqual([]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8080/v1/projects/demo-sanctuary/databases/(default)/documents:runQuery",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
 });
