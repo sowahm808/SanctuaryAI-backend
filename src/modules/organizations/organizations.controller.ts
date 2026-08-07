@@ -22,11 +22,11 @@ export class OrganizationsController {
   @Patch("current")
   patchCurrent(@CurrentUser() user: FirebaseIdentity, @Body() dto: PatchOrganizationDto): Promise<Record<string, unknown>> { return this.organizations.patchCurrent(user, dto); }
 
-  @Get("current/brand-kit")
+  @Get(["brand-kit", "current/brand-kit"])
   @ApiOperation({ summary: "Get the active organization's optional brand kit" })
   brandKit(@CurrentUser() user: FirebaseIdentity): Promise<Record<string, unknown> | null> { return this.organizations.brandKit(user); }
 
-  @Patch("current/brand-kit")
+  @Patch(["brand-kit", "current/brand-kit"])
   @ApiOperation({ summary: "Create or update the active organization's brand kit" })
   patchBrandKit(@CurrentUser() user: FirebaseIdentity, @Body() dto: UpdateBrandKitDto): Promise<Record<string, unknown>> { return this.organizations.patchBrandKit(user, dto); }
 
