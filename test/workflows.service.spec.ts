@@ -77,4 +77,23 @@ describe("WorkflowsService", () => {
 
     await expect(new WorkflowsService(firebase).create(identity, "prayers", { kind: "prayer-points" })).rejects.toBeInstanceOf(ForbiddenException);
   });
+
+  it("reads approvals with the legacy approval reviewer permission", async () => {
+    const firebase = firebaseMock({ status: "ACTIVE", permissions: ["approvals.review"] });
+    (firebase.getDocument as jest.Mock).mockImplementation((path: string) =>
+      Promise.resolve(
+        path === "users/user-1"
+          ? { activeOrganizationId: "org-1" }
+          : path === "memberships/org-1_user-1"
+            ? { status: "ACTIVE", permissions: ["approvals.review"] }
+            : path === "approvals/approval-1"
+              ? { id: "approval-1", organizationId: "org-1", status: "pending" }
+              : undefined,
+      ),
+    );
+
+    await expect(new WorkflowsService(firebase).get(identity, "approvals", "approval-1"))
+      .resolves.toEqual(expect.objectContaining({ id: "approval-1", status: "pending" }));
+    expect(firebase.getDocument).toHaveBeenCalledWith("approvals/approval-1");
+  });
 });
