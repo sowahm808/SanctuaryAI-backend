@@ -174,6 +174,32 @@ describe("FirebaseService authentication emulator support", () => {
     }));
   });
 
+  it("falls back to local ordering while a composite index is unavailable", async () => {
+    const service = new FirebaseService(config(values));
+    const firestoreRequest = jest.spyOn(service, "firestoreRequest")
+      .mockRejectedValueOnce(new ServiceUnavailableException({
+        code: "FIREBASE_ERROR",
+        message: "The query requires an index.",
+        firebaseStatus: "FAILED_PRECONDITION",
+      }))
+      .mockResolvedValueOnce([
+        { document: { name: "projects/demo/databases/(default)/documents/themes/older", fields: { updatedAt: { stringValue: "2026-08-01T00:00:00.000Z" } } } },
+        { document: { name: "projects/demo/databases/(default)/documents/themes/unsorted", fields: {} } },
+        { document: { name: "projects/demo/databases/(default)/documents/themes/newest", fields: { updatedAt: { stringValue: "2026-08-03T00:00:00.000Z" } } } },
+      ]);
+
+    await expect(service.queryDocuments("themes", "organizationId", "org-1", "updatedAt", "desc", 2)).resolves.toEqual([
+      { id: "newest", updatedAt: "2026-08-03T00:00:00.000Z" },
+      { id: "older", updatedAt: "2026-08-01T00:00:00.000Z" },
+    ]);
+    expect(firestoreRequest).toHaveBeenNthCalledWith(2, ":runQuery", expect.objectContaining({
+      body: JSON.stringify({ structuredQuery: {
+        from: [{ collectionId: "themes" }],
+        where: { fieldFilter: { field: { fieldPath: "organizationId" }, op: "EQUAL", value: { stringValue: "org-1" } } },
+      } }),
+    }));
+  });
+
   it("calls Firestore runQuery as an RPC on the documents resource", async () => {
     const fetchMock = jest.spyOn(global, "fetch").mockResolvedValue(
       new Response(JSON.stringify([]), {

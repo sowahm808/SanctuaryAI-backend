@@ -410,32 +410,66 @@ export class FirebaseService {
     direction: "asc" | "desc",
     limit: number,
   ): Promise<Record<string, unknown>[]> {
-    const results = await this.firestoreRequest<FirestoreQueryResult[]>(":runQuery", {
+    const where = {
+      fieldFilter: {
+        field: { fieldPath: field },
+        op: "EQUAL",
+        value: { stringValue: value },
+      },
+    };
+    let results: FirestoreQueryResult[];
+    try {
+      results = await this.runQuery({
+        from: [{ collectionId: collection }],
+        where,
+        orderBy: [{
+          field: { fieldPath: sort },
+          direction: direction === "asc" ? "ASCENDING" : "DESCENDING",
+        }],
+        limit,
+      });
+    } catch (error: unknown) {
+      if (!this.isMissingFirestoreIndex(error)) throw error;
+
+      // Keep collection pages available while a newly declared composite index
+      // is still being deployed. An equality-only query uses Firestore's
+      // built-in single-field index, so ordering can safely be completed here.
+      results = await this.runQuery({ from: [{ collectionId: collection }], where });
+      return this.decodeQueryResults(results)
+        .filter((document) => document[sort] !== undefined && document[sort] !== null)
+        .sort((left, right) => {
+          const comparison = String(left[sort]).localeCompare(String(right[sort]));
+          return direction === "asc" ? comparison : -comparison;
+        })
+        .slice(0, limit);
+    }
+    return this.decodeQueryResults(results);
+  }
+
+  private runQuery(structuredQuery: Record<string, unknown>): Promise<FirestoreQueryResult[]> {
+    return this.firestoreRequest<FirestoreQueryResult[]>(":runQuery", {
       method: "POST",
-      body: JSON.stringify({
-        structuredQuery: {
-          from: [{ collectionId: collection }],
-          where: {
-            fieldFilter: {
-              field: { fieldPath: field },
-              op: "EQUAL",
-              value: { stringValue: value },
-            },
-          },
-          orderBy: [{
-            field: { fieldPath: sort },
-            direction: direction === "asc" ? "ASCENDING" : "DESCENDING",
-          }],
-          limit,
-        },
-      }),
+      body: JSON.stringify({ structuredQuery }),
     });
+  }
+
+  private decodeQueryResults(results: FirestoreQueryResult[]): Record<string, unknown>[] {
     return results.flatMap(({ document }) => {
       if (!document) return [];
       const decoded = this.decodeFields(document.fields ?? {});
       const id = document.name?.split("/").pop();
       return [{ ...(id && !("id" in decoded) ? { id } : {}), ...decoded }];
     });
+  }
+
+  private isMissingFirestoreIndex(error: unknown): boolean {
+    if (!(error instanceof ServiceUnavailableException)) return false;
+    const response = error.getResponse();
+    if (typeof response === "string") return false;
+    const firebaseError = response as { firebaseStatus?: unknown; message?: unknown };
+    return firebaseError.firebaseStatus === "FAILED_PRECONDITION" &&
+      typeof firebaseError.message === "string" &&
+      firebaseError.message.toLowerCase().includes("index");
   }
 
   async putDocument(path: string, fields: Record<string, unknown>): Promise<void> {
