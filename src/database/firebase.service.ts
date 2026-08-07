@@ -104,9 +104,24 @@ export class FirebaseService {
         firebaseCode: provider?.code,
         firebaseMessage: provider?.message ?? (raw.trim() || response.statusText || "Firebase request failed"),
         firebaseDetails: provider?.details,
+        rawBody: raw,
       };
-      this.logger.error({ event: "firebase.request_failed", ...failure });
-      throw new FirestoreRequestError(failure.httpStatus, failure.firebaseStatus, failure.firebaseCode, failure.firebaseMessage, failure.firebaseDetails);
+      this.logger.error({
+        event: "firebase.request_failed",
+        httpStatus: failure.httpStatus,
+        firebaseStatus: failure.firebaseStatus,
+        firebaseCode: failure.firebaseCode,
+        firebaseMessage: failure.firebaseMessage,
+        firebaseDetails: failure.firebaseDetails,
+      });
+      throw new FirestoreRequestError(
+        failure.httpStatus,
+        failure.firebaseStatus,
+        failure.firebaseCode,
+        failure.firebaseMessage,
+        failure.firebaseDetails,
+        failure.rawBody,
+      );
     }
     return body as T;
   }
@@ -563,6 +578,7 @@ export class FirebaseService {
       return { mapValue: { fields: this.encodeFields(value) } };
     }
     if (typeof value === "string") return { stringValue: value };
+    if (typeof value === "bigint") return { integerValue: String(value) };
     throw new TypeError(`Cannot encode unsupported Firestore value of type ${typeof value}`);
   }
 
