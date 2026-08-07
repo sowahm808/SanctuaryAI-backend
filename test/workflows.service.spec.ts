@@ -51,7 +51,7 @@ describe("WorkflowsService", () => {
     expect(firebase.putDocument).toHaveBeenCalledWith(expect.stringMatching(/^prayers\//), expect.any(Object));
   });
 
-  it("does not create an unprocessable queued prayer job", async () => {
+  it("queues a persisted prayer generation job and timeline event", async () => {
     const firebase = firebaseMock({ status: "ACTIVE", permissions: ["prayers.write"] });
     (firebase.getDocument as jest.Mock).mockImplementation((path: string) =>
       Promise.resolve(
@@ -66,8 +66,23 @@ describe("WorkflowsService", () => {
     );
 
     await expect(new WorkflowsService(firebase).generate(identity, "prayers", "prayer-1", {}))
-      .rejects.toMatchObject({ status: 501 });
-    expect(firebase.putDocument).not.toHaveBeenCalledWith(expect.stringMatching(/^asyncJobs\//), expect.any(Object));
+      .resolves.toEqual(expect.objectContaining({ type: "prayers_generation", status: "queued" }));
+    expect(firebase.putDocument).toHaveBeenCalledWith(expect.stringMatching(/^asyncJobs\//), expect.objectContaining({ status: "queued" }));
+    expect(firebase.putDocument).toHaveBeenCalledWith(expect.stringMatching(/^workflowEvents\//), expect.objectContaining({ action: "generation_queued", resourceId: "prayer-1" }));
+  });
+
+  it.each(["prayers", "declarations"])("returns empty secondary metadata for an existing %s resource", async (area) => {
+    const firebase = firebaseMock({ status: "ACTIVE", role: "ChurchAdministrator", permissions: [] });
+    (firebase.getDocument as jest.Mock).mockImplementation((path: string) => Promise.resolve(
+      path === "users/user-1" ? { activeOrganizationId: "org-1" }
+        : path === "memberships/org-1_user-1" ? { status: "ACTIVE", role: "ChurchAdministrator", permissions: [] }
+          : path === `${area}/resource-1` ? { id: "resource-1", organizationId: "org-1", revision: "rev-1", versions: [] }
+            : undefined,
+    ));
+    const service = new WorkflowsService(firebase);
+    await expect(service.versions(identity, area, "resource-1")).resolves.toEqual({ items: [] });
+    await expect(service.timeline(identity, area, "resource-1")).resolves.toEqual({ items: [] });
+    await expect(service.approval(identity, area, "resource-1")).resolves.toBeNull();
   });
 
   it("still rejects active members without matching workflow permissions", async () => {
