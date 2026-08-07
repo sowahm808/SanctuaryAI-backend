@@ -1,5 +1,10 @@
-import { Type } from "class-transformer";
+import { Transform, TransformFnParams, Type } from "class-transformer";
 import { Allow, IsArray, IsIn, IsInt, IsObject, IsOptional, IsString, Max, Min } from "class-validator";
+
+const normalizeRevision = ({ value }: TransformFnParams): unknown => {
+  const revision: unknown = value;
+  return typeof revision === "number" && Number.isFinite(revision) ? String(revision) : revision;
+};
 
 export class WorkflowListQueryDto {
   @IsOptional() @IsString() cursor?: string;
@@ -10,8 +15,8 @@ export class WorkflowListQueryDto {
   @IsOptional() @IsObject() filter?: Record<string, string>;
 }
 export class WorkflowMutationDto {
-  @IsOptional() @IsString() expectedRevision?: string;
-  @IsOptional() @IsString() revision?: string;
+  @IsOptional() @Transform(normalizeRevision) @IsString() expectedRevision?: string;
+  @IsOptional() @Transform(normalizeRevision) @IsString() revision?: string;
   @IsOptional() @IsString() title?: string;
   @IsOptional() @IsString() name?: string;
   @IsOptional() @IsString() kind?: string;

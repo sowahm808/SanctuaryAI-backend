@@ -81,6 +81,26 @@ describe("WorkflowsService", () => {
     expect(firebase.putDocument).toHaveBeenCalledWith(expect.stringMatching(/^workflowEvents\//), expect.objectContaining({ action: "generation_queued", resourceId: "prayer-1" }));
   });
 
+  it("accepts numeric revisions from legacy declaration records", async () => {
+    const firebase = firebaseMock({ status: "ACTIVE", permissions: ["declarations.write"] });
+    (firebase.getDocument as jest.Mock).mockImplementation((path: string) =>
+      Promise.resolve(
+        path === "users/user-1"
+          ? { activeOrganizationId: "org-1" }
+          : path === "memberships/org-1_user-1"
+            ? { status: "ACTIVE", permissions: ["declarations.write"] }
+            : path === "declarations/declaration-1"
+              ? { id: "declaration-1", organizationId: "org-1", revision: 3, versions: [] }
+              : undefined,
+      ),
+    );
+
+    await expect(workflowsService(firebase).patch(identity, "declarations", "declaration-1", {
+      expectedRevision: "3",
+      title: "Updated declaration",
+    })).resolves.toEqual(expect.objectContaining({ title: "Updated declaration" }));
+  });
+
   it.each(["prayers", "declarations"])("returns empty secondary metadata for an existing %s resource", async (area) => {
     const firebase = firebaseMock({ status: "ACTIVE", role: "ChurchAdministrator", permissions: [] });
     (firebase.getDocument as jest.Mock).mockImplementation((path: string) => Promise.resolve(
