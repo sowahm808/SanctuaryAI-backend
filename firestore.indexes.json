@@ -115,6 +115,31 @@
       ]
     },
     {
+      "collectionGroup": "themes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "organizationId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "themes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "organizationId", "order": "ASCENDING" },
+        { "fieldPath": "revision", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "themeEvents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "organizationId", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "sermons",
       "queryScope": "COLLECTION",
       "fields": [

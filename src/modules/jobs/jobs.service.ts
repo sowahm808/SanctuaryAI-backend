@@ -38,7 +38,7 @@ export class JobsService {
       id: this.stringValue(job.id), type: this.stringValue(job.type), status: this.normalizedStatus(job.status),
       progress: Math.max(0, Math.min(100, Math.trunc(Number(job.progress) || 0))), currentSection: this.stringValue(job.currentSection) || undefined,
       message: this.stringValue(job.message) || undefined, retryable: job.retryable === true, cancellationSupported: ["queued", "running", "cancelling"].includes(this.normalizedStatus(job.status)), safeErrorCode: this.stringValue(job.safeErrorCode) || undefined, safeErrorDetail: this.stringValue(job.safeErrorDetail) || undefined,
-      sourceRevision: this.stringValue(job.sourceRevision) || undefined, targetFields: Array.isArray(job.targetFields) ? job.targetFields.filter((v): v is string => typeof v === "string") : [], createdAt: this.iso(job.createdAt), queuedAt: this.iso(job.queuedAt), startedAt: this.iso(job.startedAt), updatedAt: this.iso(job.updatedAt), completedAt: this.iso(job.completedAt), failedAt: this.iso(job.failedAt), cancelledAt: this.iso(job.cancelledAt),
+      sourceRevision: job.sourceRevision, targetFields: Array.isArray(job.targetFields) ? job.targetFields.filter((v): v is string => typeof v === "string") : [], ...(job.result && typeof job.result === "object" ? { result: job.result } : {}), createdAt: this.iso(job.createdAt), queuedAt: this.iso(job.queuedAt), startedAt: this.iso(job.startedAt), updatedAt: this.iso(job.updatedAt), completedAt: this.iso(job.completedAt), failedAt: this.iso(job.failedAt), cancelledAt: this.iso(job.cancelledAt),
     };
   }
   private enum(value: unknown, allowed: string[], fallback: string) { const s = this.stringValue(value); return allowed.includes(s) ? s : fallback; }
