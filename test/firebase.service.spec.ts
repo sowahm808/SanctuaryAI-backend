@@ -1,9 +1,7 @@
 import { ConfigService } from "@nestjs/config";
-import {
-  ServiceUnavailableException,
-  UnauthorizedException,
-} from "@nestjs/common";
+import { UnauthorizedException } from "@nestjs/common";
 import { FirebaseService } from "../src/database/firebase.service";
+import { FirestoreRequestError } from "../src/database/firestore-request.error";
 
 const token = (claims: Record<string, unknown>): string => {
   const header = Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" })).toString(
@@ -132,12 +130,7 @@ describe("FirebaseService authentication emulator support", () => {
     const firestoreRequest = jest
       .spyOn(service, "firestoreRequest")
       .mockRejectedValueOnce(
-        new ServiceUnavailableException({
-          code: "FIREBASE_ERROR",
-          message: "Document not found.",
-          firebaseStatus: "NOT_FOUND",
-          firebaseStatusCode: 404,
-        }),
+        new FirestoreRequestError(404, "NOT_FOUND", 404, "Document not found."),
       )
       .mockResolvedValueOnce({});
 
@@ -174,30 +167,14 @@ describe("FirebaseService authentication emulator support", () => {
     }));
   });
 
-  it("falls back to local ordering while a composite index is unavailable", async () => {
+  it("preserves a missing-index failure instead of sorting an unbounded collection in memory", async () => {
     const service = new FirebaseService(config(values));
     const firestoreRequest = jest.spyOn(service, "firestoreRequest")
-      .mockRejectedValueOnce(new ServiceUnavailableException({
-        code: "FIREBASE_ERROR",
-        message: "The query requires an index.",
-        firebaseStatus: "FAILED_PRECONDITION",
-      }))
-      .mockResolvedValueOnce([
-        { document: { name: "projects/demo/databases/(default)/documents/themes/older", fields: { updatedAt: { stringValue: "2026-08-01T00:00:00.000Z" } } } },
-        { document: { name: "projects/demo/databases/(default)/documents/themes/unsorted", fields: {} } },
-        { document: { name: "projects/demo/databases/(default)/documents/themes/newest", fields: { updatedAt: { stringValue: "2026-08-03T00:00:00.000Z" } } } },
-      ]);
+      .mockRejectedValueOnce(new FirestoreRequestError(400, "FAILED_PRECONDITION", 400, "The query requires an index."));
 
-    await expect(service.queryDocuments("themes", "organizationId", "org-1", "updatedAt", "desc", 2)).resolves.toEqual([
-      { id: "newest", updatedAt: "2026-08-03T00:00:00.000Z" },
-      { id: "older", updatedAt: "2026-08-01T00:00:00.000Z" },
-    ]);
-    expect(firestoreRequest).toHaveBeenNthCalledWith(2, ":runQuery", expect.objectContaining({
-      body: JSON.stringify({ structuredQuery: {
-        from: [{ collectionId: "themes" }],
-        where: { fieldFilter: { field: { fieldPath: "organizationId" }, op: "EQUAL", value: { stringValue: "org-1" } } },
-      } }),
-    }));
+    await expect(service.queryDocuments("themes", "organizationId", "org-1", "updatedAt", "desc", 2))
+      .rejects.toMatchObject({ httpStatus: 400, firebaseStatus: "FAILED_PRECONDITION", firebaseMessage: "The query requires an index." });
+    expect(firestoreRequest).toHaveBeenCalledTimes(1);
   });
 
   it("returns a stable Firestore cursor page in descending updatedAt order", async () => {
@@ -212,12 +189,14 @@ describe("FirebaseService authentication emulator support", () => {
     expect(page.items).toEqual([{ id: "newest", updatedAt: "2026-08-03T00:00:00.000Z" }]);
     expect(page.nextCursor).toEqual(expect.any(String));
     expect(firestoreRequest).toHaveBeenCalledWith(":runQuery", expect.objectContaining({
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       body: expect.stringContaining('"direction":"DESCENDING"'),
     }));
 
     firestoreRequest.mockClear().mockResolvedValue([]);
     await service.queryDocumentsPage("themes", "organizationId", "org-1", "updatedAt", "desc", 1, page.nextCursor!);
     expect(firestoreRequest).toHaveBeenCalledWith(":runQuery", expect.objectContaining({
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       body: expect.stringContaining('"referenceValue":"projects/demo-sanctuary/databases/(default)/documents/themes/newest"'),
     }));
   });
@@ -241,5 +220,23 @@ describe("FirebaseService authentication emulator support", () => {
       "http://127.0.0.1:8080/v1/projects/demo-sanctuary/databases/(default)/documents:runQuery",
       expect.objectContaining({ method: "POST" }),
     );
+  });
+
+  it("preserves the complete Firebase error response in a typed internal error", async () => {
+    jest.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify({ error: {
+      code: 400,
+      status: "INVALID_ARGUMENT",
+      message: "StructuredQuery.orderBy is invalid.",
+      details: [{ reason: "bad field reference" }],
+    } }), { status: 400, statusText: "Bad Request", headers: { "content-type": "application/json" } }));
+    const service = new FirebaseService(config({ ...values, FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080" }));
+
+    await expect(service.firestoreRequest(":runQuery", { method: "POST", body: "{}" })).rejects.toMatchObject({
+      httpStatus: 400,
+      firebaseStatus: "INVALID_ARGUMENT",
+      firebaseCode: 400,
+      firebaseMessage: "StructuredQuery.orderBy is invalid.",
+      firebaseDetails: [{ reason: "bad field reference" }],
+    });
   });
 });

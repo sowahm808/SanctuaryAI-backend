@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, Injectable, NotFoundException, NotImplementedException } from "@nestjs/common";
+import { ConflictException, ForbiddenException, Injectable, NotFoundException, NotImplementedException, UnprocessableEntityException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { requestContext } from "../../common/request-context";
 import { FirebaseIdentity, FirebaseService } from "../../database/firebase.service";
@@ -33,6 +33,7 @@ export class WorkflowsService {
 
   async list(user: FirebaseIdentity, area: string, query: WorkflowListQueryDto = new WorkflowListQueryDto()) {
     const cfg = this.cfg(area); const { organizationId } = await this.active(user, cfg.read);
+    this.validateFilters(area, query.filter ?? {});
     const repository = this.tenants ?? new TenantRepository(this.firebase);
     if (area === "users") {
       const memberships = await repository.list("memberships", organizationId, { ...query, sort: "updatedAt", allowedSorts: ["updatedAt", "createdAt"], filters: {} });
@@ -70,6 +71,15 @@ export class WorkflowsService {
   async generate(user: FirebaseIdentity, area: string, id: string, body: R = {}) { void body; const cfg = this.cfg(area); await this.item(user, cfg, id, cfg.update); throw new NotImplementedException({ code: "generation_not_supported", message: `Generation for ${area} is not available until its typed worker is deployed.` }); }
 
   private cfg(area: string) { const cfg = CONFIG[area]; if (!cfg) throw new NotFoundException({ code: "workflow_not_found", message: "Workflow area not found." }); return cfg; }
+  private validateFilters(area: string, filters: Record<string, string>) {
+    const allowed: Record<string, readonly string[]> = {
+      users: ["eligibleFor"],
+      approvals: ["status", "type", "contentType", "priority", "assigneeId", "due"],
+    };
+    const unknown = Object.keys(filters).filter((key) => !(allowed[area] ?? []).includes(key));
+    if (unknown.length) throw new UnprocessableEntityException({ code: "unsupported_filter", message: `Unsupported filter(s): ${unknown.join(", ")}.`, validation: unknown.map((field) => ({ field: `filter[${field}]`, message: "Filter is not supported." })) });
+    if (area === "users" && filters.eligibleFor !== undefined && filters.eligibleFor !== "review") throw new UnprocessableEntityException({ code: "unsupported_filter_value", message: "filter[eligibleFor] must be review." });
+  }
   private async item(user: FirebaseIdentity, cfg: (typeof CONFIG)[string], id: string, perm: string) { const item = await this.firebase.getDocument(`${cfg.collection}/${id}`); if (!item) throw new NotFoundException({ code: "resource_not_found", message: "Resource not found." }); await this.active(user, perm, this.s(item.organizationId)); return item; }
   private async active(user: FirebaseIdentity, perm: string, org?: string) { const u = await this.firebase.getDocument(`users/${user.uid}`); const organizationId = org || this.s(u?.activeOrganizationId); const m = organizationId ? await this.firebase.getDocument(`memberships/${organizationId}_${user.uid}`) : undefined; if (!organizationId || m?.status !== "ACTIVE" || !this.hasPermission(m, perm)) throw new ForbiddenException({ code: "organization_permission_missing", message: "An active organization membership with permission is required." }); return { organizationId }; }
   private hasPermission(membership: R | undefined, permission: string) { const values = this.arr(membership?.permissions).map((value) => this.s(value)); const role = this.s(membership?.role); const [area, action] = permission.split("."); const legacyWrite = area && ["create", "update", "upload"].includes(action ?? "") ? `${area}.write` : ""; const legacyRead = action === "read" && values.includes("organizations.read"); const legacyApprovalReview = area === "reviews" && ["read", "approve"].includes(action ?? "") && values.includes("approvals.review"); return values.includes(permission) || (legacyWrite ? values.includes(legacyWrite) : false) || legacyRead || legacyApprovalReview || values.includes("admin") || ["ChurchAdministrator", "SuperAdministrator"].includes(role); }

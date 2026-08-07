@@ -50,6 +50,7 @@ describe("ThemeGenerationQueue", () => {
     const promise = producer.publish(payload);
     await expect(promise).rejects.toBeInstanceOf(ServiceUnavailableException);
     await expect(promise).rejects.toMatchObject({ response: { code: "generation_queue_unavailable", detail: "Theme generation cannot be queued right now. Please retry shortly.", correlationId: "correlation-1", validation: [] } });
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     await expect(promise).rejects.not.toMatchObject({ response: expect.objectContaining({ detail: expect.stringContaining("WRONGPASS") }) });
   });
 

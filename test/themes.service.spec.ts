@@ -1,4 +1,5 @@
 import { FirebaseService } from "../src/database/firebase.service";
+import { FirestoreRequestError } from "../src/database/firestore-request.error";
 import { ServiceUnavailableException } from "@nestjs/common";
 import { ThemesService } from "../src/modules/themes/themes.service";
 import { ThemeGenerationService } from "../src/modules/themes/theme-generation.service";
@@ -48,11 +49,7 @@ describe("ThemesService", () => {
   });
 
   it("logs the database failure and returns a safe correlated list error", async () => {
-    const firebaseFailure = new ServiceUnavailableException({
-      code: "FIREBASE_ERROR",
-      message: "The query requires an index. Create it at https://console.firebase.google.com/secret-index-url",
-      firebaseStatus: "FAILED_PRECONDITION",
-    });
+    const firebaseFailure = new FirestoreRequestError(400, "FAILED_PRECONDITION", 400, "The query requires an index. Create it at https://console.firebase.google.com/secret-index-url");
     const firebase = {
       getDocument: jest.fn((path: string) => Promise.resolve(
         path === "users/user-1" ? { activeOrganizationId: "org-1" }
@@ -66,8 +63,8 @@ describe("ThemesService", () => {
     const error: unknown = await service.list(identity, { limit: 20, sort: "updatedAt", direction: "desc" }).catch((failure: unknown) => failure);
     expect(error).toBeInstanceOf(ServiceUnavailableException);
     expect((error as ServiceUnavailableException).getResponse()).toEqual(expect.objectContaining({
-      code: "theme_list_unavailable",
-      detail: "Themes are temporarily unavailable. Please retry shortly.",
+      code: "firestore_index_unavailable",
+      detail: "Themes are temporarily unavailable while database infrastructure is prepared.",
     }));
   });
 
