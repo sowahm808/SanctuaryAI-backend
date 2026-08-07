@@ -35,7 +35,7 @@ export class DashboardService {
 
   /** Rebuild the cached read model out of tenant-scoped source collections. */
   async rebuildDashboardSummary(organizationId: string): Promise<Record<string, unknown>> {
-    const collections = ["themes", "prayers", "declarations", "flyers", "approvals", "asyncJobs"] as const;
+    const collections = ["themes", "prayers", "declarations", "flyerProjects", "approvals", "asyncJobs"] as const;
     const [themes, prayers, declarations, flyers, approvals, jobs] = await Promise.all(
       collections.map((collection) => this.firebase.queryDocuments(collection, "organizationId", organizationId, "updatedAt", "desc", 100)),
     );
