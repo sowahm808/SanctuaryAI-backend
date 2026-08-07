@@ -241,6 +241,12 @@ describe("FirebaseService authentication emulator support", () => {
       firebaseCode: 400,
       firebaseMessage: "StructuredQuery.orderBy is invalid.",
       firebaseDetails: [{ reason: "bad field reference" }],
+      rawBody: JSON.stringify({ error: {
+        code: 400,
+        status: "INVALID_ARGUMENT",
+        message: "StructuredQuery.orderBy is invalid.",
+        details: [{ reason: "bad field reference" }],
+      } }),
     });
   });
 
@@ -296,6 +302,7 @@ describe("FirebaseService authentication emulator support", () => {
     expect(encodeValue(true)).toEqual({ booleanValue: true });
     expect(encodeValue(2)).toEqual({ integerValue: "2" });
     expect(encodeValue(2.5)).toEqual({ doubleValue: 2.5 });
+    expect(encodeValue(2n)).toEqual({ integerValue: "2" });
     expect(encodeValue(null)).toEqual({ nullValue: null });
     expect(encodeValue([instant])).toEqual({ arrayValue: { values: [{ timestampValue: "2026-08-07T00:00:00.000Z" }] } });
     expect(encodeValue({ nested: { at: instant } })).toEqual({ mapValue: { fields: { nested: { mapValue: { fields: { at: { timestampValue: "2026-08-07T00:00:00.000Z" } } } } } } });
