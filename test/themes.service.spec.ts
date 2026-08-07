@@ -10,6 +10,24 @@ import { ThemeGenerationQueue } from "../src/modules/themes/theme-generation.que
 const identity = { uid: "user-1", emailVerified: true, claims: {} };
 
 describe("ThemesService", () => {
+  it("lists themes for the active organization using the requested ordering", async () => {
+    const firebase = {
+      getDocument: jest.fn((path: string) => Promise.resolve(
+        path === "users/user-1" ? { activeOrganizationId: "org-1" }
+          : path === "memberships/org-1_user-1" ? { status: "ACTIVE", permissions: ["themes.read"] }
+            : undefined,
+      )),
+      queryDocuments: jest.fn().mockResolvedValue([{ id: "theme-1", organizationId: "org-1" }]),
+    } as unknown as FirebaseService;
+    const service = new ThemesService(firebase, { generate: jest.fn() } as unknown as ThemeGenerationService, { publish: jest.fn() } as unknown as ThemeGenerationQueue);
+
+    await expect(service.list(identity, { limit: 20, sort: "updatedAt", direction: "desc" })).resolves.toEqual({
+      items: [{ id: "theme-1", organizationId: "org-1" }],
+      nextCursor: null,
+    });
+    expect(firebase.queryDocuments).toHaveBeenCalledWith("themes", "organizationId", "org-1", "updatedAt", "desc", 20);
+  });
+
   it("accepts and normalizes the theme workflow brief payload", async () => {
     const firebase = {
       getDocument: jest.fn((path: string) => Promise.resolve(
@@ -100,6 +118,6 @@ describe("ThemesService", () => {
     const queue = { publish: jest.fn().mockRejectedValue(queueError) } as unknown as ThemeGenerationQueue;
 
     await expect(new ThemesService(firebase, { generate: jest.fn() } as unknown as ThemeGenerationService, queue).generate(identity, "theme-1")).rejects.toBe(queueError);
-    expect(writes).toContainEqual(expect.objectContaining({ status: "enqueue_failed", safeErrorCode: "generation_queue_unavailable", correlationId: expect.any(String) }));
+    expect(writes.some((write) => write.status === "enqueue_failed" && write.safeErrorCode === "generation_queue_unavailable" && typeof write.correlationId === "string")).toBe(true);
   });
 });

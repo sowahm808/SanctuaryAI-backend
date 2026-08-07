@@ -41,7 +41,12 @@ export interface FirebaseIdentity {
 }
 
 interface FirestoreDocument {
+  name?: string;
   fields?: Record<string, FirestoreValue>;
+}
+
+interface FirestoreQueryResult {
+  document?: FirestoreDocument;
 }
 
 type FirestoreValue =
@@ -388,6 +393,42 @@ export class FirebaseService {
         return undefined;
       throw error;
     }
+  }
+
+  async queryDocuments(
+    collection: string,
+    field: string,
+    value: string,
+    sort: string,
+    direction: "asc" | "desc",
+    limit: number,
+  ): Promise<Record<string, unknown>[]> {
+    const results = await this.firestoreRequest<FirestoreQueryResult[]>(":runQuery", {
+      method: "POST",
+      body: JSON.stringify({
+        structuredQuery: {
+          from: [{ collectionId: collection }],
+          where: {
+            fieldFilter: {
+              field: { fieldPath: field },
+              op: "EQUAL",
+              value: { stringValue: value },
+            },
+          },
+          orderBy: [{
+            field: { fieldPath: sort },
+            direction: direction === "asc" ? "ASCENDING" : "DESCENDING",
+          }],
+          limit,
+        },
+      }),
+    });
+    return results.flatMap(({ document }) => {
+      if (!document) return [];
+      const decoded = this.decodeFields(document.fields ?? {});
+      const id = document.name?.split("/").pop();
+      return [{ ...(id && !("id" in decoded) ? { id } : {}), ...decoded }];
+    });
   }
 
   async putDocument(path: string, fields: Record<string, unknown>): Promise<void> {

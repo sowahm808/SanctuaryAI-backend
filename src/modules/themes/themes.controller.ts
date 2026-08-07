@@ -1,11 +1,12 @@
-import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, Patch, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { FirebaseIdentity } from "../../database/firebase.service";
 import { CurrentUser, FirebaseAuthGuard } from "../../security/firebase-auth.guard";
-import { ThemeActionDto, ThemeCommentDto, ThemeInputDto, ThemeOutputDto, ThemePatchInputDto, ThemeRefineDto } from "./dto";
+import { ThemeActionDto, ThemeCommentDto, ThemeInputDto, ThemeListQueryDto, ThemeOutputDto, ThemePatchInputDto, ThemeRefineDto } from "./dto";
 import { ThemesService } from "./themes.service";
 @ApiTags("Themes") @ApiBearerAuth() @UseGuards(FirebaseAuthGuard) @Controller("themes")
 export class ThemesController{constructor(private readonly themes:ThemesService){}
+ @Get() list(@CurrentUser() u:FirebaseIdentity,@Query() q:ThemeListQueryDto){return this.themes.list(u,q)}
  @Post() create(@CurrentUser() u:FirebaseIdentity,@Body() d:ThemeInputDto){return this.themes.create(u,d)}
  @Get(":id") get(@CurrentUser() u:FirebaseIdentity,@Param("id") id:string){return this.themes.get(u,id)}
  @Patch(":id/input") input(@CurrentUser() u:FirebaseIdentity,@Param("id") id:string,@Body() d:ThemePatchInputDto){return this.themes.patchInput(u,id,d)}
