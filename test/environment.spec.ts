@@ -31,4 +31,14 @@ describe("environmentSchema", () => {
   it.each([undefined, "", "https://redis.example", "not a url"])("rejects malformed or missing REDIS_URL %p", (REDIS_URL) => {
     expect(environmentSchema.validate({ ...valid, REDIS_URL }).error).toBeDefined();
   });
+
+  it.each(["", "  ", "'openai-api-key'", "\"openai-api-key\""])("rejects unsafe OPENAI_API_KEY %p", (OPENAI_API_KEY) => {
+    expect(environmentSchema.validate({ ...valid, REDIS_URL: "redis://localhost:6379", OPENAI_API_KEY }).error).toBeDefined();
+  });
+
+  it("validates and normalizes OpenAI model and request timeout", () => {
+    const result = environmentSchema.validate({ ...valid, REDIS_URL: "redis://localhost:6379", OPENAI_MODEL: " gpt-4o-mini ", AI_REQUEST_TIMEOUT_MS: "90000" });
+    expect(result.error).toBeUndefined();
+    expect(result.value).toEqual(expect.objectContaining({ OPENAI_MODEL: "gpt-4o-mini", AI_REQUEST_TIMEOUT_MS: 90_000 }));
+  });
 });
