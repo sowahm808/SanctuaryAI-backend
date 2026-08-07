@@ -3,6 +3,7 @@ import { UnprocessableEntityException } from "@nestjs/common";
 export type QueryDirection = "asc" | "desc";
 export type FirestoreQueryValue =
   | { stringValue: string }
+  | { timestampValue: string }
   | { referenceValue: string };
 
 export interface CollectionQueryInput {
@@ -17,6 +18,13 @@ export interface CollectionQueryInput {
 }
 
 export interface CollectionCursor { value: string; id: string; }
+
+const cursorValue = (sort: string, value: string): FirestoreQueryValue =>
+  // Firestore cursors are typed. Encoding an ISO timestamp as stringValue
+  // makes a timestamp orderBy cursor an INVALID_ARGUMENT on the next page.
+  sort.endsWith("At") && !Number.isNaN(Date.parse(value))
+    ? { timestampValue: value }
+    : { stringValue: value };
 
 const fieldFilter = (fieldPath: string, value: string) => ({
   fieldFilter: { field: { fieldPath }, op: "EQUAL", value: { stringValue: value } },
@@ -49,7 +57,7 @@ export const buildCollectionQuery = (input: CollectionQueryInput): Record<string
   if (input.cursor) {
     const cursor = decodeCollectionCursor(input.cursor);
     query.startAt = { before: false, values: [
-      { stringValue: cursor.value },
+      cursorValue(input.sort, cursor.value),
       { referenceValue: `projects/${input.projectId}/databases/(default)/documents/${input.collection}/${cursor.id}` },
     ] satisfies FirestoreQueryValue[] };
   }
