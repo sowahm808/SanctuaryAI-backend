@@ -1,7 +1,8 @@
-import { ConflictException, ForbiddenException, HttpException, Injectable, Logger, NotFoundException, ServiceUnavailableException, UnprocessableEntityException } from "@nestjs/common";
+import { ConflictException, ForbiddenException, HttpException, Injectable, InternalServerErrorException, Logger, NotFoundException, ServiceUnavailableException, UnprocessableEntityException } from "@nestjs/common";
 import { createHash, randomUUID } from "node:crypto";
 import { requestContext } from "../../common/request-context";
 import { FirebaseIdentity, FirebaseService } from "../../database/firebase.service";
+import { FirestoreRequestError } from "../../database/firestore-request.error";
 import { ThemeActionDto, ThemeCommentDto, ThemeDraftUpdateDto, ThemeInputDto, ThemeListQueryDto, ThemeOutputDto, ThemePatchInputDto, ThemeRefineDto } from "./dto";
 import { ThemeGenerationService } from "./theme-generation.service";
 import { ThemeGenerationQueue } from "./theme-generation.queue";
@@ -31,10 +32,11 @@ export class ThemesService {
     } catch (error) {
       if (error instanceof HttpException && !(error instanceof ServiceUnavailableException)) throw error;
       const correlationId = requestContext.getStore()?.correlationId ?? randomUUID();
-      const response = error instanceof ServiceUnavailableException ? error.getResponse() : undefined;
-      const detail = typeof response === "object" && response !== null ? response as R : {};
-      this.logger.error({ event: "theme.collection.query_failed", correlationId, organizationId, firestoreQuery: { collection: "themes", where: ["organizationId", "==", organizationId], orderBy: [query.sort, query.direction], tieBreaker: ["__name__", query.direction], limit: query.limit + 1 }, firebaseStatus: detail.firebaseStatus, firebaseStatusCode: detail.firebaseStatusCode, firebaseMessage: detail.message, errorName: error instanceof Error ? error.name : "UnknownError", errorMessage: error instanceof Error ? error.message : String(error) }, "Theme collection query failed");
-      throw new ServiceUnavailableException({ code: "theme_list_unavailable", detail: "Themes are temporarily unavailable. Please retry shortly.", correlationId, validation: [] });
+      const provider = error instanceof FirestoreRequestError ? error : undefined;
+      this.logger.error({ event: "theme.collection.query_failed", correlationId, organizationId, firestoreQuery: { collection: "themes", where: ["organizationId", "==", organizationId], orderBy: [query.sort, query.direction], tieBreaker: ["__name__", query.direction], limit: query.limit + 1 }, httpStatus: provider?.httpStatus, firebaseStatus: provider?.firebaseStatus, firebaseCode: provider?.firebaseCode, firebaseMessage: provider?.firebaseMessage, firebaseDetails: provider?.firebaseDetails, errorName: error instanceof Error ? error.name : "UnknownError", errorMessage: error instanceof Error ? error.message : String(error) }, "Theme collection query failed");
+      const safe = { code: provider?.firebaseStatus === "FAILED_PRECONDITION" ? "firestore_index_unavailable" : "theme_list_failed", detail: provider?.firebaseStatus === "FAILED_PRECONDITION" ? "Themes are temporarily unavailable while database infrastructure is prepared." : "The theme query could not be completed.", correlationId, validation: [] };
+      if (provider?.firebaseStatus === "FAILED_PRECONDITION") throw new ServiceUnavailableException(safe, { cause: error });
+      throw new InternalServerErrorException(safe, { cause: error });
     }
   }
 

@@ -1,6 +1,7 @@
 import "reflect-metadata";
 import { ValidationPipe } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
+import { NestExpressApplication } from "@nestjs/platform-express";
 import { ConfigService } from "@nestjs/config";
 import { SwaggerModule, DocumentBuilder } from "@nestjs/swagger";
 
@@ -14,11 +15,15 @@ import { legacyApiPathMiddleware } from "./common/legacy-api-path.middleware";
 import { ProblemFilter } from "./common/problem.filter";
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bufferLogs: true,
   });
 
   const config = app.get(ConfigService);
+
+  // Express' extended parser turns the documented filter[key]=value contract
+  // into a nested object before the global DTO validation pipe runs.
+  app.set("query parser", "extended");
 
   // Keep existing clients functional while they migrate to versioned URLs.
   app.use(legacyApiPathMiddleware);
