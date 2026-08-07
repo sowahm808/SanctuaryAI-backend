@@ -420,8 +420,8 @@ export class FirebaseService {
     };
     let results: FirestoreQueryResult[];
     try {
-      results = await this.runQuery({
-        from: [{ collectionId: collection }],
+      results = await this.runCollectionQuery(collection, {
+        from: [{ collectionId: collection.split("/").at(-1)! }],
         where,
         orderBy: [{
           field: { fieldPath: sort },
@@ -435,7 +435,7 @@ export class FirebaseService {
       // Keep collection pages available while a newly declared composite index
       // is still being deployed. An equality-only query uses Firestore's
       // built-in single-field index, so ordering can safely be completed here.
-      results = await this.runQuery({ from: [{ collectionId: collection }], where });
+      results = await this.runCollectionQuery(collection, { from: [{ collectionId: collection.split("/").at(-1)! }], where });
       return this.decodeQueryResults(results)
         .filter((document) => document[sort] !== undefined && document[sort] !== null)
         .sort((left, right) => {
@@ -491,6 +491,14 @@ export class FirebaseService {
       method: "POST",
       body: JSON.stringify({ structuredQuery }),
     });
+  }
+
+  private runCollectionQuery(collection: string, structuredQuery: Record<string, unknown>): Promise<FirestoreQueryResult[]> {
+    const segments = collection.split("/").filter(Boolean);
+    if (segments.length === 1) return this.runQuery(structuredQuery);
+    if (segments.length % 2 === 0) throw new UnprocessableEntityException({ code: "invalid_collection_path", message: "The collection path is invalid." });
+    const parent = `projects/${this.projectId}/databases/(default)/documents/${segments.slice(0, -1).join("/")}`;
+    return this.firestoreRequest<FirestoreQueryResult[]>(":runQuery", { method: "POST", body: JSON.stringify({ parent, structuredQuery }) });
   }
 
   private decodeQueryResults(results: FirestoreQueryResult[]): Record<string, unknown>[] {

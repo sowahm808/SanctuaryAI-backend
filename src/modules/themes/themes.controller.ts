@@ -18,6 +18,7 @@ export class ThemesController{constructor(private readonly themes:ThemesService,
  @Patch(":id/output") output(@CurrentUser() u:FirebaseIdentity,@Param("id") id:string,@Body() d:ThemeOutputDto){return this.themes.output(u,id,d)}
  @Get(":id/preview") preview(@CurrentUser() u:FirebaseIdentity,@Param("id") id:string){return this.themes.preview(u,id)}
  @Get(":id/versions") versions(@CurrentUser() u:FirebaseIdentity,@Param("id") id:string){return this.themes.versions(u,id)}
+ @Get(":id/timeline") timeline(@CurrentUser() u:FirebaseIdentity,@Param("id") id:string){return this.themes.timeline(u,id)}
  @Post(":id/comments") comment(@CurrentUser() u:FirebaseIdentity,@Param("id") id:string,@Body() d:ThemeCommentDto){return this.themes.comment(u,id,d)}
  @Patch(":id/comments/:commentId") patchComment(@CurrentUser() u:FirebaseIdentity,@Param("id") id:string,@Param("commentId") cid:string,@Body() d:ThemeCommentDto){return this.themes.comment(u,id,d,cid)}
  @Post(":id/submit-review") submit(@CurrentUser() u:FirebaseIdentity,@Param("id") id:string,@Body() d:ThemeActionDto){return this.themes.action(u,id,"review",d)}
