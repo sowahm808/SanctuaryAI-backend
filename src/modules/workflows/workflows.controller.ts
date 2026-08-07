@@ -16,6 +16,7 @@ enum WorkflowArea {
   Social = "social",
   Publishing = "publishing",
   Calendar = "calendar",
+  Approvals = "approvals",
   Reviews = "reviews",
   Notifications = "notifications",
   Team = "team",
