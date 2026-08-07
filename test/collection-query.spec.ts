@@ -18,8 +18,17 @@ describe("Firestore collection query serializer", () => {
     const cursor = encodeCollectionCursor({ value: "2026-08-07T00:00:00.000Z", id: "theme-1" });
     expect(buildCollectionQuery({ collection: "themes", organizationId: "org-1", sort: "updatedAt", direction: "desc", limit: 20, cursor, projectId: "demo" }))
       .toMatchObject({ startAt: { before: false, values: [
-        { stringValue: "2026-08-07T00:00:00.000Z" },
+        { timestampValue: "2026-08-07T00:00:00.000Z" },
         { referenceValue: "projects/demo/databases/(default)/documents/themes/theme-1" },
+      ] } });
+  });
+
+  it("keeps string sort cursors typed as strings", () => {
+    const cursor = encodeCollectionCursor({ value: "pending_approval", id: "approval-1" });
+    expect(buildCollectionQuery({ collection: "approvals", organizationId: "org-1", sort: "status", direction: "asc", limit: 20, cursor, projectId: "demo" }))
+      .toMatchObject({ startAt: { values: [
+        { stringValue: "pending_approval" },
+        { referenceValue: "projects/demo/databases/(default)/documents/approvals/approval-1" },
       ] } });
   });
 });

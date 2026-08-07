@@ -197,6 +197,10 @@ describe("FirebaseService authentication emulator support", () => {
     await service.queryDocumentsPage("themes", "organizationId", "org-1", "updatedAt", "desc", 1, page.nextCursor!);
     expect(firestoreRequest).toHaveBeenCalledWith(":runQuery", expect.objectContaining({
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      body: expect.stringContaining('"timestampValue":"2026-08-03T00:00:00.000Z"'),
+    }));
+    expect(firestoreRequest).toHaveBeenCalledWith(":runQuery", expect.objectContaining({
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       body: expect.stringContaining('"referenceValue":"projects/demo-sanctuary/databases/(default)/documents/themes/newest"'),
     }));
   });
