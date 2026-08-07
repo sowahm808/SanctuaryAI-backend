@@ -30,12 +30,16 @@ const CONFIG: Record<string, { collection: string; create: string; read: string;
 
 @Injectable()
 export class WorkflowsService {
-  constructor(private readonly firebase: FirebaseService, private readonly tenants?: TenantRepository, private readonly approvals = new ApprovalWorkflowService(firebase)) {}
+  constructor(
+    private readonly firebase: FirebaseService,
+    private readonly tenants: TenantRepository,
+    private readonly approvals: ApprovalWorkflowService,
+  ) {}
 
   async list(user: FirebaseIdentity, area: string, query: WorkflowListQueryDto = new WorkflowListQueryDto()) {
     const cfg = this.cfg(area); const { organizationId } = await this.active(user, cfg.read);
     this.validateFilters(area, query.filter ?? {});
-    const repository = this.tenants ?? new TenantRepository(this.firebase);
+    const repository = this.tenants;
     if (area === "users") {
       const memberships = await repository.list("memberships", organizationId, { ...query, sort: "updatedAt", allowedSorts: ["updatedAt", "createdAt"], filters: {} });
       const eligible = query.filter?.eligibleFor === "review";
