@@ -127,8 +127,14 @@ export class FirebaseService {
   }
 
   private firebaseErrorEnvelope(value: unknown): FirebaseError["error"] {
-    if (!this.isPlainObject(value) || !this.isPlainObject(value.error)) return undefined;
-    const error = value.error;
+    // Unlike most Google APIs, Firestore's runQuery RPC can wrap an error in
+    // its streaming response array. Normalize both shapes here so callers do
+    // not have to inspect or re-parse the raw provider response.
+    const envelope: unknown = Array.isArray(value) ? (value as unknown[]).find((item) =>
+      this.isPlainObject(item) && this.isPlainObject(item.error),
+    ) : value;
+    if (!this.isPlainObject(envelope) || !this.isPlainObject(envelope.error)) return undefined;
+    const error = envelope.error;
     return {
       code: typeof error.code === "number" ? error.code : undefined,
       message: typeof error.message === "string" ? error.message : undefined,

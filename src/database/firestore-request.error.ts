@@ -23,3 +23,7 @@ export class FirestoreRequestError extends Error implements FirebaseFailure {
     super(firebaseMessage, options);
   }
 }
+
+export function isMissingFirestoreIndex(error: FirestoreRequestError): boolean {
+  return error.firebaseStatus === "FAILED_PRECONDITION" && /index/i.test(error.firebaseMessage);
+}

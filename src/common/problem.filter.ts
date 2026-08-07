@@ -7,14 +7,13 @@ import {
 } from "@nestjs/common";
 import type { Response } from "express";
 import { requestContext } from "./request-context";
-import { FirestoreRequestError } from "../database/firestore-request.error";
+import { FirestoreRequestError, isMissingFirestoreIndex } from "../database/firestore-request.error";
 @Catch()
 export class ProblemFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost) {
     const response = host.switchToHttp().getResponse<Response>();
     const firestoreStatus = exception instanceof FirestoreRequestError
-      ? (["UNAVAILABLE", "DEADLINE_EXCEEDED"].includes(exception.firebaseStatus ?? "") ||
-          (exception.firebaseStatus === "FAILED_PRECONDITION" && /index/i.test(exception.message))
+      ? (["UNAVAILABLE", "DEADLINE_EXCEEDED"].includes(exception.firebaseStatus ?? "") || isMissingFirestoreIndex(exception)
           ? HttpStatus.SERVICE_UNAVAILABLE
           : HttpStatus.INTERNAL_SERVER_ERROR)
       : undefined;
@@ -24,12 +23,7 @@ export class ProblemFilter implements ExceptionFilter {
         : HttpStatus.INTERNAL_SERVER_ERROR
     );
     const value = exception instanceof FirestoreRequestError
-      ? {
-          code: status === 503 ? "firestore_unavailable" : "firestore_request_failed",
-          message: status === 503
-            ? "The data service is temporarily unavailable."
-            : "The server generated an invalid data request.",
-        }
+      ? this.firestoreProblem(exception)
       :
       exception instanceof HttpException
         ? exception.getResponse()
@@ -71,5 +65,28 @@ export class ProblemFilter implements ExceptionFilter {
           message,
         })),
       });
+  }
+
+  private firestoreProblem(error: FirestoreRequestError): { code: string; message: string } {
+    if (isMissingFirestoreIndex(error)) return {
+      code: "firestore_index_not_ready",
+      message: "This data view is temporarily unavailable while its database index is being prepared.",
+    };
+    if (error.firebaseStatus === "DEADLINE_EXCEEDED") return {
+      code: "firestore_timeout",
+      message: "The data service did not respond in time.",
+    };
+    if (error.firebaseStatus === "UNAVAILABLE") return {
+      code: "firestore_unavailable",
+      message: "The data service is temporarily unavailable.",
+    };
+    if (error.firebaseStatus === "INVALID_ARGUMENT") return {
+      code: "firestore_invalid_server_query",
+      message: "The server generated an invalid data request.",
+    };
+    return {
+      code: "firestore_request_failed",
+      message: "The data request could not be completed.",
+    };
   }
 }
