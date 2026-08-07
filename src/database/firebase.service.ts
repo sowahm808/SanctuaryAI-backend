@@ -26,7 +26,7 @@ interface FirebaseRefreshResponse {
   user_id: string;
 }
 interface FirebaseError {
-  error?: { code?: number; message?: string; status?: string };
+  error?: { code?: number; message?: string; status?: string; details?: unknown };
 }
 interface FirebaseAuthResponse {
   idToken: string;
@@ -91,16 +91,21 @@ export class FirebaseService {
     });
     const raw = await response.text();
     let body: T & FirebaseError;
-    try { body = (raw ? JSON.parse(raw) : {}) as T & FirebaseError; }
-    catch { body = {} as T & FirebaseError; }
+    let parsed = false;
+    try {
+      body = (raw ? JSON.parse(raw) : {}) as T & FirebaseError;
+      parsed = raw.length > 0;
+    } catch {
+      body = {} as T & FirebaseError;
+    }
     if (!response.ok) {
       const provider = body.error;
       const failure = {
         httpStatus: response.status,
         firebaseStatus: provider?.status,
         firebaseCode: provider?.code,
-        firebaseMessage: provider?.message ?? response.statusText ?? "Unknown Firebase error",
-        firebaseDetails: "details" in (provider ?? {}) ? (provider as FirebaseError["error"] & { details?: unknown }).details : undefined,
+        firebaseMessage: provider?.message ?? (!parsed && raw.trim() ? raw.trim() : undefined) ?? response.statusText ?? "Unknown Firebase error",
+        firebaseDetails: provider?.details,
       };
       this.logger.error({ event: "firebase.request_failed", ...failure });
       throw new FirestoreRequestError(failure.httpStatus, failure.firebaseStatus, failure.firebaseCode, failure.firebaseMessage, failure.firebaseDetails);
@@ -163,6 +168,18 @@ export class FirebaseService {
     const url = path.startsWith(":")
       ? `${documentsUrl}${path}`
       : `${documentsUrl}/${path}`;
+    if (url.endsWith(":runQuery") && (this.config.get<string>("NODE_ENV") ?? process.env.NODE_ENV) !== "production") {
+      let structuredQueryBody: unknown = init?.body;
+      if (typeof init?.body === "string") {
+        try { structuredQueryBody = JSON.parse(init.body) as unknown; } catch { /* retain text for diagnostics */ }
+      }
+      this.logger.debug({
+        event: "firestore.request",
+        method: init?.method ?? "GET",
+        endpoint: url,
+        body: structuredQueryBody,
+      });
+    }
     return this.json<T>(
       url,
       {
@@ -472,8 +489,14 @@ export class FirebaseService {
     const segments = collection.split("/").filter(Boolean);
     if (segments.length === 1) return this.runQuery(structuredQuery);
     if (segments.length % 2 === 0) throw new UnprocessableEntityException({ code: "invalid_collection_path", message: "The collection path is invalid." });
-    const parent = `projects/${this.projectId}/databases/(default)/documents/${segments.slice(0, -1).join("/")}`;
-    return this.firestoreRequest<FirestoreQueryResult[]>(":runQuery", { method: "POST", body: JSON.stringify({ parent, structuredQuery }) });
+    // The parent is part of the runQuery resource name, not a request-body
+    // property. Google rejects an otherwise valid StructuredQuery when a
+    // `parent` sibling is included in the JSON payload.
+    const parentPath = segments.slice(0, -1).join("/");
+    return this.firestoreRequest<FirestoreQueryResult[]>(`${parentPath}:runQuery`, {
+      method: "POST",
+      body: JSON.stringify({ structuredQuery }),
+    });
   }
 
   private decodeQueryResults(results: FirestoreQueryResult[]): Record<string, unknown>[] {

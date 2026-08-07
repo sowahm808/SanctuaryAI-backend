@@ -243,4 +243,38 @@ describe("FirebaseService authentication emulator support", () => {
       firebaseDetails: [{ reason: "bad field reference" }],
     });
   });
+
+  it.each([
+    ["INVALID_ARGUMENT", "example"],
+    ["FAILED_PRECONDITION", "query requires an index"],
+  ])("retains a %s Google error envelope", async (status, message) => {
+    jest.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify({ error: { code: 400, message, status } }), { status: 400, statusText: "Bad Request" }));
+    const service = new FirebaseService(config({ ...values, FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080" }));
+    await expect(service.firestoreRequest(":runQuery", { method: "POST", body: "{}" })).rejects.toMatchObject({
+      httpStatus: 400, firebaseCode: 400, firebaseStatus: status, firebaseMessage: message,
+    });
+  });
+
+  it("uses a plain-text Firebase error body when no JSON envelope exists", async () => {
+    jest.spyOn(global, "fetch").mockResolvedValue(new Response("upstream rejected query", { status: 400, statusText: "Bad Request" }));
+    const service = new FirebaseService(config({ ...values, FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080" }));
+    await expect(service.firestoreRequest(":runQuery", { method: "POST", body: "{}" })).rejects.toMatchObject({
+      httpStatus: 400, firebaseMessage: "upstream rejected query",
+    });
+  });
+
+  it("places a subcollection parent in the runQuery endpoint rather than its body", async () => {
+    const fetchMock = jest.spyOn(global, "fetch").mockResolvedValue(new Response("[]", { status: 200 }));
+    const service = new FirebaseService(config({ ...values, FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080" }));
+    await service.queryDocuments("themes/theme-1/versions", "organizationId", "org-1", "createdAt", "desc", 1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8080/v1/projects/demo-sanctuary/databases/(default)/documents/themes/theme-1:runQuery",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ structuredQuery: {
+        from: [{ collectionId: "versions" }],
+        where: { fieldFilter: { field: { fieldPath: "organizationId" }, op: "EQUAL", value: { stringValue: "org-1" } } },
+        orderBy: [{ field: { fieldPath: "createdAt" }, direction: "DESCENDING" }],
+        limit: 1,
+      } }) }),
+    );
+  });
 });

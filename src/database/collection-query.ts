@@ -8,9 +8,9 @@ export type FirestoreQueryValue =
 
 export interface CollectionQueryInput {
   collection: string;
-  organizationId: string;
-  sort: string;
-  direction: QueryDirection;
+  organizationId?: string;
+  sort?: string;
+  direction?: QueryDirection;
   limit: number;
   filters?: Readonly<Record<string, string>>;
   cursor?: string;
@@ -44,17 +44,21 @@ export const encodeCollectionCursor = (cursor: CollectionCursor): string =>
 /** Produces Firestore REST StructuredQuery JSON; __name__ is a fieldPath and its cursor is a referenceValue. */
 export const buildCollectionQuery = (input: CollectionQueryInput): Record<string, unknown> => {
   const direction = input.direction === "asc" ? "ASCENDING" : "DESCENDING";
-  const filters = [fieldFilter("organizationId", input.organizationId), ...Object.entries(input.filters ?? {}).map(([key, value]) => fieldFilter(key, value))];
+  const filters = [
+    ...(input.organizationId === undefined ? [] : [fieldFilter("organizationId", input.organizationId)]),
+    ...Object.entries(input.filters ?? {}).map(([key, value]) => fieldFilter(key, value)),
+  ];
   const query: Record<string, unknown> = {
     from: [{ collectionId: input.collection }],
-    where: filters.length === 1 ? filters[0] : { compositeFilter: { op: "AND", filters } },
-    orderBy: [
-      { field: { fieldPath: input.sort }, direction },
-      { field: { fieldPath: "__name__" }, direction },
-    ],
     limit: input.limit + 1,
   };
+  if (filters.length) query.where = filters.length === 1 ? filters[0] : { compositeFilter: { op: "AND", filters } };
+  if (input.sort) query.orderBy = [
+    { field: { fieldPath: input.sort }, direction },
+    { field: { fieldPath: "__name__" }, direction },
+  ];
   if (input.cursor) {
+    if (!input.sort) throw new UnprocessableEntityException({ code: "invalid_cursor", message: "A pagination cursor requires a sort field." });
     const cursor = decodeCollectionCursor(input.cursor);
     query.startAt = { before: false, values: [
       cursorValue(input.sort, cursor.value),
