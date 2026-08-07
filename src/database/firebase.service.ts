@@ -145,8 +145,15 @@ export class FirebaseService {
     const authorization = emulator
       ? "Bearer owner"
       : `Bearer ${await this.serviceAccessToken()}`;
+    const documentsUrl = `${base}/projects/${this.projectId}/databases/(default)/documents`;
+    // Firestore RPC endpoints use a colon suffix on the documents resource
+    // (for example, `documents:runQuery`), not a child path such as
+    // `documents/:runQuery`.
+    const url = path.startsWith(":")
+      ? `${documentsUrl}${path}`
+      : `${documentsUrl}/${path}`;
     return this.json<T>(
-      `${base}/projects/${this.projectId}/databases/(default)/documents/${path}`,
+      url,
       {
         ...init,
         headers: {
