@@ -14,6 +14,7 @@ import { JobsModule } from "./modules/jobs/jobs.module";
 import { CampaignsModule } from "./modules/campaigns/campaigns.module";
 import { ThemesModule } from "./modules/themes/themes.module";
 import { WorkflowsModule } from "./modules/workflows/workflows.module";
+import { ApprovalPersistenceModule } from "./modules/workflows/approval-persistence.module";
 import { PublicConfigModule } from "./modules/public-config/public-config.module";
 import { SecurityModule } from "./security/security.module";
 import { createRedisWorkerConnection, redisConnectionDiagnostic } from "./config/redis";
@@ -52,6 +53,7 @@ import { createRedisWorkerConnection, redisConnectionDiagnostic } from "./config
     DashboardModule,
     OrganizationsModule,
     JobsModule,
+    ApprovalPersistenceModule,
     CampaignsModule,
     ThemesModule,
     // Register static public routes before WorkflowsModule's top-level

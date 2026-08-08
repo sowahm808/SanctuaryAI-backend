@@ -1,12 +1,12 @@
 # Firestore persistence audit
 
-Audited 2026-08-07. The “appears in Firestore” column reflects the production collection list supplied with this audit; it is not inferred from index configuration. Firestore creates a collection on its first document write, so no empty collections or synthetic documents were created.
+Audited 2026-08-08. The “appears in Firestore” column reflects the production collection list supplied with this audit; it is not inferred from index configuration. Firestore creates a collection on its first document write, so no empty collections or synthetic documents were created.
 
 ## Route-to-collection trace
 
 | Feature | Expected collection | Actual collection | Read path | Write path | Currently used? |
 |---|---|---|---|---|---|
-| Approval / Review Center | `approvals` | `approvals` | `GET /api/approvals`, `GET /api/approvals/:id`, and resource approval lookup | `POST /api/{prayers,declarations,flyers}/:id/submit-review`; Theme review submission also writes here | Yes; canonicalized |
+| Approval / Review Center | `approvals` | `approvals` | `GET /api/approvals`, `GET /api/approvals/:id`, and resource approval lookup | Generic, Theme, and Campaign-section submit-review routes delegate to `ApprovalWorkflowService` | Yes; canonicalized |
 | Review comments | `reviewComments` | `reviewComments` for approval comments; non-approval comments remain embedded in their resource | `GET /api/approvals/:id` | `POST /api/approvals/:id/comments` | Yes, naturally created on first approval comment |
 | Generic workflow timeline | `workflowEvents` | `workflowEvents` | `GET /api/{prayers,declarations,flyers,...}/:id/timeline` and approval detail | Every generic workflow create/save/generate/comment/review mutation | Yes, naturally created on first generic workflow mutation |
 | Theme timeline | `themeEvents` | `themeEvents` | `GET /api/themes/:id/timeline` | Theme mutations | Yes; intentionally theme-specific, not a reader/writer mismatch |
@@ -28,14 +28,29 @@ The backend Firestore adapter exposes `getDocument`, `findDocument`, `queryDocum
 A generic submit-review request loads the tenant-owned versioned resource, calls `ApprovalWorkflowService.submit`, writes `approvals/{id}`, updates the resource with `activeApprovalId`, and writes both `workflowEvents` and `auditEvents`. The canonical persisted document contains:
 
 - `id`, `organizationId`, `resourceType`, `resourceId`
-- compatibility aliases `contentType` and `contentId`
 - `status`, `requestedByUserId`, optional `reviewerUserId`
 - `versionId`, `revision`
 - `submittedAt`, `createdAt`, `updatedAt`; `decidedAt` is added for terminal decisions
 
 When a reviewer is assigned at submission, `notifications/{id}` is also persisted with the approval and resource references. Unassigned review requests intentionally do not manufacture a recipient notification.
 
-Theme review uses the same canonical `approvals` collection, although its timeline remains in the existing theme-specific `themeEvents` model. Prayer, Declaration, Flyer, Sermon, Video, and generic Publishing workflows use `workflowEvents`. Each generic event write is paired with an operational `auditEvents` write; readers and writers are therefore connected rather than attempting to derive UI labels from audit records.
+New writes contain only canonical field names. Legacy `contentType`/`contentId`, `requestedBy`, and `assigneeId` documents are accepted solely by an explicit read compatibility mapper and are never emitted by `ApprovalRepository`.
+
+Theme review uses the same canonical `approvals` collection, although its timeline remains in the existing theme-specific `themeEvents` model. Prayer, Declaration, Flyer, Sermon, Video, and generic Publishing workflows use `workflowEvents`. Campaign sections use `resourceType=campaign_section`, `resourceId={campaignId}:{scope}`, and the exact section-version id/revision. Each generic event write is paired with an operational `auditEvents` write; readers and writers are therefore connected rather than attempting to derive UI labels from audit records.
+
+## Submit-review route audit and root cause
+
+| Resource | Controller → service method | Resource mutation | Approval write | Timeline/audit | Notification |
+|---|---|---|---|---|---|
+| Prayers, Declarations, Sermons, Flyers, Videos, Publishing/social posts | `WorkflowsController.action` → `WorkflowsService.action` → `ApprovalWorkflowService.submit` | `pending_approval`, `activeApprovalId` | `approvals/{id}` through `ApprovalRepository` | `workflowEvents` + `auditEvents` | Assigned reviewer only |
+| Themes | `ThemesController.submit` → `ThemesService.action` → `ApprovalWorkflowService.submit` | `pending_approval`, `activeApprovalId` | Same canonical repository | `themeEvents` | Assigned reviewer only |
+| Campaign sections | `CampaignsController.submit` → `CampaignsService.sectionAction` → `ApprovalWorkflowService.submit` | scoped `sectionApprovalStates[scope]` | Same canonical repository with exact scoped version | `auditEvents` | Assigned reviewer only |
+
+The missing collection was caused by incomplete, competing submit paths: generic workflows had only recently gained a write, Theme still created legacy-shaped `pending_approval` documents itself, and Campaign sections only mutated the Campaign and audit record. The queue then read a different mixture of field/status aliases. The repository/service boundary now owns creation, duplicate detection, tenant scoping, assignment, and decisions. Resource and approval status remain deliberately distinct (`pending_approval` versus `pending`).
+
+The queue queries the active tenant by `organizationId`, ordered by `updatedAt`, and then returns actionable `pending`, `in_review`, and `changes_requested` records. Unassigned records remain visible to users who passed `reviews.read`; an assignee filter is applied only when explicitly requested. Hydration resolves resource, requester, reviewer, and immutable version preview before responding.
+
+Firebase authentication UIDs and internal `User.id` were previously written interchangeably. Submission and decisions now resolve the profile to canonical internal `User.id` (falling back only for legacy profiles with no internal id), while reviewer assignment searches tenant memberships by their canonical `userId` rather than comparing an internal id to a Firebase UID.
 
 ## Domain model / physical collection report
 
@@ -56,3 +71,7 @@ Theme review uses the same canonical `approvals` collection, although its timeli
 ## Production-list interpretation
 
 The supplied collections (`asyncJobs`, `auditEvents`, `campaigns`, `declarations`, `memberships`, `organizations`, `prayers`, `sermons`, `sessions`, `themeEvents`, `themes`, `users`) show that those paths have received at least one retained document. Absence of the other names alone does not distinguish an unused feature from a broken write. The code traces above classify each absence without creating data. The genuine mismatches fixed by this audit are the dashboard rebuild’s stale `flyers` query and the missing reviewer-notification side effect.
+
+## Consistency decision
+
+The current Firestore adapter uses document REST operations and does not expose transactions. Submission therefore writes the Approval first and immediately applies the resource state; if that second write fails, `ApprovalWorkflowService.compensateFailedSubmission` tenant-checks and deletes only the still-pending Approval. This prevents either half-state from surviving a reported resource-write failure without pretending the REST adapter offers transactional guarantees. Decision events are written only after both domain records succeed.
