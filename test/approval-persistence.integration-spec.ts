@@ -6,6 +6,7 @@ import { FirebaseService } from "../src/database/firebase.service";
 import { TenantRepository } from "../src/database/tenant-repository";
 import { FirebaseAuthGuard } from "../src/security/firebase-auth.guard";
 import { ApprovalWorkflowService } from "../src/modules/workflows/approval-workflow.service";
+import { ApprovalRepository } from "../src/modules/workflows/approval.repository";
 import { WorkflowsController } from "../src/modules/workflows/workflows.controller";
 import { WorkflowsService } from "../src/modules/workflows/workflows.service";
 
@@ -23,6 +24,7 @@ describe("approval persistence workflow", () => {
   const documents = new Map<string, Document>([
     ["users/author-1", { id: "author-1", activeOrganizationId: "org-1" }],
     ["memberships/org-1_author-1", { id: "org-1_author-1", organizationId: "org-1", userId: "author-1", status: "ACTIVE", role: "ChurchAdministrator", permissions: [] }],
+    ["memberships/org-1_reviewer-1", { id: "org-1_reviewer-1", organizationId: "org-1", userId: "reviewer-1", status: "ACTIVE", permissions: ["reviews.approve"] }],
   ]);
 
   const firebase = {
@@ -42,6 +44,7 @@ describe("approval persistence workflow", () => {
       providers: [
         { provide: FirebaseService, useValue: firebase },
         TenantRepository,
+        ApprovalRepository,
         ApprovalWorkflowService,
         WorkflowsService,
       ],
@@ -75,6 +78,17 @@ describe("approval persistence workflow", () => {
       const body = response.body as unknown as Document;
       expect(body.items).toEqual([expect.objectContaining({ id: persisted?.[1].id, resourceId: prayerId, status: "pending" })]);
     });
+    await request(server).get(`/api/prayers/${prayerId}/approval`).expect(200).expect((response) => {
+      expect(response.body).toEqual(expect.objectContaining({ id: persisted?.[1].id, versionId: versionedBody.currentVersionId }));
+    });
+    await request(server).post(`/api/approvals/${String(persisted?.[1].id)}/comments`).send({ body: "Exact version reviewed." }).expect(201);
+    expect([...documents.keys()].some((path) => path.startsWith("reviewComments/"))).toBe(true);
+    await request(server).post(`/api/approvals/${String(persisted?.[1].id)}/approve`).send({}).expect(201);
+    expect(documents.get(`approvals/${String(persisted?.[1].id)}`)).toEqual(expect.objectContaining({ status: "approved", reviewerUserId: "author-1" }));
+    expect(documents.get(`prayers/${prayerId}`)).toEqual(expect.objectContaining({ status: "approved" }));
+    await request(server).get("/api/approvals").expect(200).expect((response) => expect((response.body as Document).items).toEqual([]));
     expect([...documents.keys()].some((path) => path.startsWith("notifications/"))).toBe(true);
+    expect([...documents.keys()].some((path) => path.startsWith("workflowEvents/"))).toBe(true);
+    expect([...documents.keys()].some((path) => path.startsWith("auditEvents/"))).toBe(true);
   });
 });

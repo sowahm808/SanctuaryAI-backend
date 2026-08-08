@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, HttpException, Injectable, InternalServerErrorException, Logger, NotFoundException, ServiceUnavailableException, UnprocessableEntityException } from "@nestjs/common";
+import { ConflictException, ForbiddenException, HttpException, Injectable, InternalServerErrorException, Logger, NotFoundException, Optional, ServiceUnavailableException, UnprocessableEntityException } from "@nestjs/common";
 import { createHash, randomUUID } from "node:crypto";
 import { requestContext } from "../../common/request-context";
 import { FirebaseIdentity, FirebaseService } from "../../database/firebase.service";
@@ -6,6 +6,7 @@ import { FirestoreRequestError } from "../../database/firestore-request.error";
 import { ThemeActionDto, ThemeCommentDto, ThemeDraftUpdateDto, ThemeInputDto, ThemeListQueryDto, ThemeOutputDto, ThemePatchInputDto, ThemeRefineDto } from "./dto";
 import { ThemeGenerationService } from "./theme-generation.service";
 import { ThemeGenerationQueue } from "./theme-generation.queue";
+import { ApprovalWorkflowService } from "../workflows/approval-workflow.service";
 
 type R = Record<string, unknown>;
 export const THEME_STATES = ["draft", "generating", "version_ready", "pending_approval", "in_review", "changes_requested", "approved", "rejected", "failed", "cancelled"] as const;
@@ -22,7 +23,7 @@ const LABELS: Record<string, string> = { "theme.created": "Theme created", "them
 @Injectable()
 export class ThemesService {
   private readonly logger = new Logger(ThemesService.name);
-  constructor(private readonly firebase: FirebaseService, private readonly generator: ThemeGenerationService, private readonly queue: ThemeGenerationQueue) {}
+  constructor(private readonly firebase: FirebaseService, private readonly generator: ThemeGenerationService, private readonly queue: ThemeGenerationQueue, @Optional() private readonly approvals?: ApprovalWorkflowService) {}
 
   async list(user: FirebaseIdentity, query: ThemeListQueryDto) {
     const { organizationId } = await this.active(user, "themes.read");
@@ -51,7 +52,7 @@ export class ThemesService {
   }
 
   async get(user: FirebaseIdentity, id: string) { return this.theme(user, id, "themes.read"); }
-  async patchDraft(user: FirebaseIdentity, id: string, dto: ThemeDraftUpdateDto) { const { expectedRevision, draft, ...input } = dto; return this.saveDraft(user, id, expectedRevision, { ...input, ...(draft ?? {}) }); }
+  async patchDraft(user: FirebaseIdentity, id: string, dto: ThemeDraftUpdateDto) { const { expectedRevision, revision, draft, ...input } = dto; const expected = expectedRevision ?? revision; if (expected === undefined || expected === null || this.value(expected) === "") throw new ConflictException({ code: "expected_revision_required", message: "expectedRevision (or legacy revision) is required." }); return this.saveDraft(user, id, expected, { ...input, ...(draft ?? {}) }); }
   async patchInput(user: FirebaseIdentity, id: string, dto: ThemePatchInputDto) { const { revision, idempotencyKey, ...input } = dto; void idempotencyKey; return this.saveDraft(user, id, revision, input); }
 
   private async saveDraft(user: FirebaseIdentity, id: string, expectedRevision: unknown, input: R) {
@@ -96,26 +97,28 @@ export class ThemesService {
   async action(user: FirebaseIdentity, id: string, action: string, dto: ThemeActionDto) {
     const permission = action === "approve" || action === "changes_requested" || action === "rejected" ? "themes.approve" : "themes.update";
     const t = await this.theme(user, id, permission); if (dto.revision !== undefined) this.assertRevision(t, dto.revision);
-    if (action === "review") return this.submitReview(user, t, dto);
+    if (action === "review") return this.submitReview(user, t);
     const target: ThemeState = action === "approve" ? "approved" : action as ThemeState;
     // A reviewer opening a pending item is an authoritative transition before deciding.
     let source = this.state(t); if (source === "pending_approval") source = "in_review";
     this.assertTransition(source, target);
     const now = new Date().toISOString(), locks = target === "approved" ? [{ reason: "approved", versionId: t.currentVersionId, lockedRevision: t.revision, actorId: user.uid, timestamp: now }] : this.arr(t.locks);
     const updated = { ...t, status: target, approvalState: target, locks, updatedAt: now };
+    const approvalId = this.s(t.activeApprovalId);
+    if (!approvalId || !this.approvals) throw new ConflictException({ code: "active_approval_required", message: "No canonical approval exists for this theme version." });
+    await this.approvals.transition(approvalId, target === "changes_requested" ? "changes_requested" : target === "approved" ? "approved" : "rejected", user, dto.feedback);
     await this.firebase.putDocument(`themes/${id}`, updated);
-    const approvalId = this.s(t.activeApprovalId); if (approvalId) { const approval = await this.firebase.getDocument(`approvals/${approvalId}`); if (approval) await this.firebase.putDocument(`approvals/${approvalId}`, { ...approval, status: target, decisionBy: user.uid, feedback: dto.feedback ?? "", updatedAt: now }); }
     await this.event(user, updated, `theme.${target}`, dto.feedback ?? LABELS[`theme.${target}`] ?? target, this.s(t.currentVersionId)); return updated;
   }
 
-  private async submitReview(user: FirebaseIdentity, t: R, dto: ThemeActionDto) {
+  private async submitReview(user: FirebaseIdentity, t: R) {
     if (!this.s(t.currentVersionId)) throw new ConflictException({ code: "theme_version_required", message: "Generate or save a version before submitting for review." });
     this.assertTransition(this.state(t), "pending_approval");
-    if (this.s(t.activeApprovalId)) { const active = await this.firebase.getDocument(`approvals/${this.s(t.activeApprovalId)}`); if (active && ["pending_approval", "in_review"].includes(this.s(active.status))) throw new ConflictException({ code: "theme_review_already_active", message: "This version already has an active review." }); }
-    const now = new Date().toISOString(), approvalId = randomUUID();
-    const approval = { id: approvalId, organizationId: t.organizationId, contentType: "theme", contentId: t.id, versionId: t.currentVersionId, revision: t.revision, status: "pending_approval", requestedBy: user.uid, feedback: dto.feedback ?? "", createdAt: now, updatedAt: now };
-    const updated = { ...t, status: "pending_approval", approvalState: "pending_approval", activeApprovalId: approvalId, updatedAt: now };
-    await this.firebase.putDocument(`approvals/${approvalId}`, approval); await this.firebase.putDocument(`themes/${this.s(t.id)}`, updated);
+    if (!this.approvals) throw new InternalServerErrorException({ code: "approval_pipeline_unavailable", message: "Approval persistence is unavailable." });
+    const approval = await this.approvals.submit(user, t, "theme", this.s(t.currentVersionId), this.value(t.revision));
+    const now = new Date().toISOString();
+    const updated = { ...t, status: "pending_approval", approvalState: "pending_approval", activeApprovalId: approval.id, updatedAt: now };
+    try { await this.firebase.putDocument(`themes/${this.s(t.id)}`, updated); } catch (error) { await this.approvals.compensateFailedSubmission(this.s(t.organizationId), this.s(approval.id)); throw error; }
     await this.event(user, updated, "theme.submitted_for_review", "Theme submitted for review", this.s(t.currentVersionId)); return { theme: updated, approval };
   }
 
