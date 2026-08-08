@@ -2,6 +2,7 @@ import { ForbiddenException } from "@nestjs/common";
 import { FirebaseService } from "../src/database/firebase.service";
 import { TenantRepository } from "../src/database/tenant-repository";
 import { ApprovalWorkflowService } from "../src/modules/workflows/approval-workflow.service";
+import { ApprovalRepository } from "../src/modules/workflows/approval.repository";
 import { WorkflowsService } from "../src/modules/workflows/workflows.service";
 
 /* Jest method mocks are asserted without invoking the unbound method. */
@@ -172,6 +173,24 @@ describe("WorkflowsService", () => {
       expect.objectContaining({ id: "a-1", title: "Morning Prayer", status: "pending", requestedByName: "Michael Author", preview: { title: "Morning Prayer", prayerPoints: ["Grace"] } }),
       expect.objectContaining({ id: "a-2", title: "August Declaration", status: "in_review", reviewerUserId: "user-1" }),
     ]));
+  });
+
+  it("includes legacy pending approval statuses when the production repository is injected", async () => {
+    const firebase = firebaseMock({ status: "ACTIVE", permissions: ["approvals.review"] });
+    (firebase.queryDocuments as jest.Mock).mockResolvedValue([
+      { id: "legacy-1", organizationId: "org-1", resourceType: "themes", resourceId: "theme-1", status: "PENDING_APPROVAL", requestedByUserId: "author-1", updatedAt: "2026-01-01" },
+    ]);
+    (firebase.getDocument as jest.Mock).mockImplementation((path: string) => Promise.resolve(
+      path === "users/user-1" ? { id: "user-1", activeOrganizationId: "org-1" }
+        : path === "memberships/org-1_user-1" ? { status: "ACTIVE", permissions: ["approvals.review"] }
+          : path === "themes/theme-1" ? { id: "theme-1", title: "Legacy theme" }
+            : undefined,
+    ));
+    const repository = new ApprovalRepository(firebase);
+    const service = new WorkflowsService(firebase, new TenantRepository(firebase), new ApprovalWorkflowService(firebase, repository), repository);
+
+    await expect(service.list(identity, "approvals", { limit: 20, sort: "updatedAt", direction: "desc", filter: {} }))
+      .resolves.toEqual(expect.objectContaining({ items: [expect.objectContaining({ id: "legacy-1", status: "pending", title: "Legacy theme" })], total: 1 }));
   });
 
   it("applies real assignee filters without hiding unassigned approvals by default", async () => {

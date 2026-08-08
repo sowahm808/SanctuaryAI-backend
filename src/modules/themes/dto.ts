@@ -21,4 +21,4 @@ export class ThemeDraftUpdateDto extends ThemeInputDto { @IsOptional() expectedR
 export class ThemeOutputDto { @IsDefined() revision!: string | number; @IsOptional() @IsObject() output?: Record<string, unknown>; @IsOptional() @IsString() changeSummary?: string; }
 export class ThemeRefineDto { @IsIn(["prophetic","pastoral","simplify","add-scriptures","shorten","expand","alternative-generation"]) scope!: string; @IsOptional() @IsString() sourceRevision?: string; @IsOptional() @IsString() idempotencyKey?: string; @IsOptional() @IsArray() targetFields?: string[]; }
 export class ThemeCommentDto { @IsString() body!: string; @IsOptional() @IsArray() mentions?: string[]; @IsOptional() resolved?: boolean; }
-export class ThemeActionDto { @IsOptional() @IsString() revision?: string; @IsOptional() @IsString() feedback?: string; }
+export class ThemeActionDto { @IsOptional() @IsString() revision?: string; @IsOptional() @IsString() feedback?: string; @IsOptional() @IsString() reviewerUserId?: string; }

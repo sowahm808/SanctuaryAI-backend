@@ -1,7 +1,7 @@
 import "reflect-metadata";
 import { plainToInstance } from "class-transformer";
 import { validate } from "class-validator";
-import { ThemeDraftUpdateDto } from "../src/modules/themes/dto";
+import { ThemeActionDto, ThemeDraftUpdateDto } from "../src/modules/themes/dto";
 
 describe("ThemeDraftUpdateDto contract", () => {
   it.each([
@@ -14,5 +14,11 @@ describe("ThemeDraftUpdateDto contract", () => {
   it("rejects unknown frontend-only properties", async () => {
     const errors = await validate(plainToInstance(ThemeDraftUpdateDto, { expectedRevision: 3, unexpected: true }), { whitelist: true, forbidNonWhitelisted: true });
     expect(errors).toEqual([expect.objectContaining({ property: "unexpected" })]);
+  });
+});
+
+describe("ThemeActionDto contract", () => {
+  it("accepts the reviewer selected by the approval UI", async () => {
+    await expect(validate(plainToInstance(ThemeActionDto, { revision: "rev-3", reviewerUserId: "reviewer-1" }), { whitelist: true, forbidNonWhitelisted: true })).resolves.toEqual([]);
   });
 });
