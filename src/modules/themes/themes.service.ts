@@ -97,7 +97,7 @@ export class ThemesService {
   async action(user: FirebaseIdentity, id: string, action: string, dto: ThemeActionDto) {
     const permission = action === "approve" || action === "changes_requested" || action === "rejected" ? "themes.approve" : "themes.update";
     const t = await this.theme(user, id, permission); if (dto.revision !== undefined) this.assertRevision(t, dto.revision);
-    if (action === "review") return this.submitReview(user, t);
+    if (action === "review") return this.submitReview(user, t, dto.reviewerUserId);
     const target: ThemeState = action === "approve" ? "approved" : action as ThemeState;
     // A reviewer opening a pending item is an authoritative transition before deciding.
     let source = this.state(t); if (source === "pending_approval") source = "in_review";
@@ -111,11 +111,11 @@ export class ThemesService {
     await this.event(user, updated, `theme.${target}`, dto.feedback ?? LABELS[`theme.${target}`] ?? target, this.s(t.currentVersionId)); return updated;
   }
 
-  private async submitReview(user: FirebaseIdentity, t: R) {
+  private async submitReview(user: FirebaseIdentity, t: R, reviewerUserId?: string) {
     if (!this.s(t.currentVersionId)) throw new ConflictException({ code: "theme_version_required", message: "Generate or save a version before submitting for review." });
     this.assertTransition(this.state(t), "pending_approval");
     if (!this.approvals) throw new InternalServerErrorException({ code: "approval_pipeline_unavailable", message: "Approval persistence is unavailable." });
-    const approval = await this.approvals.submit(user, t, "theme", this.s(t.currentVersionId), this.value(t.revision));
+    const approval = await this.approvals.submit(user, t, "theme", this.s(t.currentVersionId), this.value(t.revision), this.s(reviewerUserId));
     const now = new Date().toISOString();
     const updated = { ...t, status: "pending_approval", approvalState: "pending_approval", activeApprovalId: approval.id, updatedAt: now };
     try { await this.firebase.putDocument(`themes/${this.s(t.id)}`, updated); } catch (error) { await this.approvals.compensateFailedSubmission(this.s(t.organizationId), this.s(approval.id)); throw error; }

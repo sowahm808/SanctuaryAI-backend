@@ -31,6 +31,8 @@ Treat UUIDs as opaque strings and timestamps as ISO-8601 instants. Format them i
 1. **Campaign workspace:** month/year picker, unique-conflict handling, progress, theme, sermon series/sermons, prayers, and declarations. Constrain month to 1–12 and year to the supported API range.
 2. **Versioned editors:** themes, sermons, prayer collections, declarations, flyers, and social posts need history drawers. Save with a required change summary; show editor/time/approval state and snapshot comparison. Restoration creates a new version rather than mutating history.
 3. **Approval inbox:** filter by status/assignee/date, render threaded review comments, field paths, resolution, and explicit approve/reject/request-changes actions. Disable editing approved content until the API reopens or versions it.
+
+For the concrete approval response contract, submit routes, cache invalidation rules, filters, and an Angular diagnostic checklist, see [Approval center frontend integration guide](./APPROVAL_FRONTEND_INTEGRATION_GUIDE.md).
 4. **Media library and brand kit:** expose upload/processing/quarantine/ready states. Only ready, same-tenant assets can be selected for logos or content. Do not expose storage keys or provider credentials.
 5. **Social planner:** calendar/list views, per-platform account selection, timezone-aware scheduling, approval state, publishing jobs, bounded retry feedback, and partial-publication details.
 6. **Knowledge base:** ingestion status and document/chunk metadata without embedding vectors. Offer retry/delete only when permissions and state allow it.

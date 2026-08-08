@@ -44,6 +44,7 @@ export class SectionActionDto {
   @IsOptional() @IsString() revision?: string;
   @IsOptional() @IsString() reason?: string;
   @IsOptional() @IsString() feedback?: string;
+  @IsOptional() @IsString() reviewerUserId?: string;
 }
 
 export class GenerateDto {
