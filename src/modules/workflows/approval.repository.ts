@@ -22,6 +22,13 @@ export interface ApprovalDocument {
 }
 
 const ACTIVE: ApprovalStatus[] = ["pending", "in_review", "changes_requested"];
+const ACTIVE_ALIASES = new Set([
+  ...ACTIVE,
+  "pending_review",
+  "pending_approval",
+  "submitted",
+  "awaiting_review",
+]);
 
 @Injectable()
 export class ApprovalRepository {
@@ -43,12 +50,14 @@ export class ApprovalRepository {
   async findCurrentForResource(organizationId: string, resourceType: string, resourceId: string, versionId?: string, revision?: string): Promise<ApprovalDocument | null> {
     const values = await this.listTenant(organizationId);
     return values.find((item) => item.resourceType === resourceType && item.resourceId === resourceId &&
-      (!versionId || item.versionId === versionId) && (!revision || String(item.revision) === revision) && ACTIVE.includes(item.status)) ??
+      (!versionId || item.versionId === versionId) && (!revision || String(item.revision) === revision) && this.isActive(item.status)) ??
       values.find((item) => item.resourceType === resourceType && item.resourceId === resourceId) ?? null;
   }
 
   async listQueue(organizationId: string): Promise<ApprovalDocument[]> {
-    return (await this.listTenant(organizationId)).filter((item) => ACTIVE.includes(item.status));
+    // Older workflow writers persisted upper-case and `pending_approval` aliases.
+    // Keep them visible until they are rewritten by the next approval transition.
+    return (await this.listTenant(organizationId)).filter((item) => this.isActive(item.status));
   }
 
   assign(organizationId: string, id: string, reviewerUserId: string) { return this.update(organizationId, id, { reviewerUserId, status: "in_review" }); }
@@ -76,5 +85,9 @@ export class ApprovalRepository {
   private async listTenant(organizationId: string): Promise<ApprovalDocument[]> {
     const values = await this.firebase.queryDocuments(ApprovalRepository.collection, "organizationId", organizationId, "updatedAt", "desc", 500);
     return values as unknown as ApprovalDocument[];
+  }
+
+  private isActive(status: unknown): boolean {
+    return typeof status === "string" && ACTIVE_ALIASES.has(status.trim().toLowerCase());
   }
 }
